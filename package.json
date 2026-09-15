@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -k -n web,worker -c teal,magenta \"next dev\" \"npm run worker\"",
+    "dev": "tsx scripts/dev.ts",
     "dev:web": "next dev",
     "build": "prisma generate --config prisma7.config.ts && next build",
     "start": "next start",
@@ -15,9 +15,11 @@
     "db:migrate:deploy": "prisma migrate deploy --config prisma7.config.ts",
     "db:generate": "prisma generate --config prisma7.config.ts",
     "bootstrap:admin": "tsx --env-file=.env.local scripts/bootstrap-admin.ts",
+    "bootstrap:host": "tsx --env-file=.env.local scripts/bootstrap-host.ts",
     "seed:capability": "tsx --env-file=.env.local scripts/seed-capability.ts",
     "worker": "tsx scripts/ai-worker.ts",
-    "worker:once": "tsx scripts/ai-worker.ts --once"
+    "worker:once": "tsx scripts/ai-worker.ts --once",
+    "live:verify:m22": "tsx --env-file=.env.local scripts/live-verify-m22.ts"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "^1.7.5",

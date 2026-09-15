@@ -38,6 +38,7 @@ enum CapabilitySource {
 
 enum AiJobKind {
   PROFILE_PREPARE
+  ARAYANLAR_PREPARE
 }
 
 enum AiJobStatus {
@@ -50,9 +51,32 @@ enum AiJobStatus {
 
 enum CreditLotSource {
   SPONSORED_PROFILE_PREPARE
+  SPONSORED_ARAYANLAR_PREPARE
+  PLATFORM_HOST_ARAYANLAR
   MONTHLY
   PURCHASED
   STAFF_GIFT
+}
+
+enum ArayanlarApplicationStatus {
+  DRAFT
+  AWAITING_CONFIRMATION
+  SUBMITTED
+  WITHDRAWN
+}
+
+enum ArayanlarPrepStatus {
+  NOT_STARTED
+  QUEUED
+  RUNNING
+  READY
+  FAILED
+  CANCELLED
+}
+
+enum ArayanlarArtifactKind {
+  GUEST_BRIEF
+  HOST_PACK
 }
 
 enum CreditEntryType {
@@ -98,6 +122,10 @@ model User {
   aiJobs           AiJob[]
   creditLots       CreditLot[]
   creditEntries    CreditLedgerEntry[]
+  hostAuthorization HostAuthorization?
+  arayanlarApplications ArayanlarApplication[] @relation("ArayanlarApplicant")
+  assignedApplications  ArayanlarApplication[] @relation("ArayanlarAssignedHost")
+  hostGrantsIssued      HostAuthorization[]    @relation("HostGrantIssuer")
 
   @@map("user")
 }
@@ -272,8 +300,9 @@ model AiJob {
   id                   String      @id @default(cuid())
   userId               String
   user                 User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  profileId            String
-  profile              Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  /// Required for PROFILE_PREPARE; optional for ARAYANLAR_PREPARE (CV/profile not required).
+  profileId            String?
+  profile              Profile?    @relation(fields: [profileId], references: [id], onDelete: Cascade)
   kind                 AiJobKind
   status               AiJobStatus @default(QUEUED)
   attemptCount         Int         @default(0)
@@ -284,7 +313,7 @@ model AiJob {
   cvDocument           CvDocument? @relation(fields: [cvDocumentId], references: [id], onDelete: SetNull)
   /// Private storage path for input text (CV extract or paste). Never logged.
   inputTextRelativePath String?
-  profileDraftRevision Int
+  profileDraftRevision Int         @default(0)
   creditCostSnapshot   Int
   reservationEntryId   String?     @unique
   resultJson           Json?
@@ -299,10 +328,13 @@ model AiJob {
   updatedAt            DateTime    @updatedAt
 
   ledgerEntries CreditLedgerEntry[]
+  arayanlarApplicationId String?
+  arayanlarApplication   ArayanlarApplication? @relation(fields: [arayanlarApplicationId], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt])
   @@index([userId, createdAt])
   @@index([leaseExpiresAt])
+  @@index([arayanlarApplicationId])
   @@map("ai_job")
 }
 
@@ -360,4 +392,76 @@ model AutomatedContentReview {
 
   @@index([profileId, createdAt])
   @@map("automated_content_review")
+}
+
+model HostAuthorization {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grantedByUserId String
+  grantedBy       User      @relation("HostGrantIssuer", fields: [grantedByUserId], references: [id], onDelete: Restrict)
+  provenance      String
+  createdAt       DateTime  @default(now())
+  revokedAt       DateTime?
+
+  @@map("host_authorization")
+}
+
+model ArayanlarApplication {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation("ArayanlarApplicant", fields: [userId], references: [id], onDelete: Cascade)
+
+  status     ArayanlarApplicationStatus @default(DRAFT)
+  prepStatus ArayanlarPrepStatus        @default(NOT_STARTED)
+
+  /// Conversation + draft answers before confirmation.
+  draftAnswers       Json @default("{}")
+  conversationTurns  Json @default("[]")
+  questionsAsked     Int  @default(0)
+  useSummaryFallback Boolean @default(false)
+
+  /// Immutable member-confirmed facts for a submitted revision.
+  submittedFacts          Json?
+  submittedRevision       Int       @default(0)
+  submittedAt             DateTime?
+  confirmedCostAt         DateTime?
+  editorialTemplateVersion String   @default("arayanlar-18m-v1")
+
+  withdrawnAt DateTime?
+
+  assignedHostUserId String?
+  assignedHost       User?     @relation("ArayanlarAssignedHost", fields: [assignedHostUserId], references: [id], onDelete: SetNull)
+  assignedAt         DateTime?
+  assignedByUserId   String?
+
+  prepareJobId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  artifacts ArayanlarArtifact[]
+  aiJobs    AiJob[]
+
+  @@index([status, createdAt])
+  @@index([assignedHostUserId])
+  @@map("arayanlar_application")
+}
+
+model ArayanlarArtifact {
+  id            String                @id @default(cuid())
+  applicationId String
+  application   ArayanlarApplication  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  kind          ArayanlarArtifactKind
+  submittedRevision Int
+  editorialTemplateVersion String
+  generatedJson Json
+  /// Host-only edits; never overwrite generatedJson silently on regeneration of a new revision.
+  hostEditedJson Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([applicationId, kind, submittedRevision])
+  @@index([applicationId, kind])
+  @@map("arayanlar_artifact")
 }

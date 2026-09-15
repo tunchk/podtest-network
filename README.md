@@ -4,6 +4,7 @@ Open community around software, quality, engineering, careers, and the people be
 
 Milestone 1 delivers accounts, profiles, directory and manual publication moderation.
 Milestone 2.1 adds optional CV → AI profile suggestions, a durable worker, sponsored credits, and assistive automated review.
+Milestone 2.2 adds optional PodTest Arayanlar preparation (guest brief + assigned-host pack).
 
 ## Stack (verified at implementation time)
 
@@ -61,6 +62,11 @@ Environment variable **names** used:
 - `AI_ALLOW_STUB` (test/demo alias; cannot enable stubs in production)
 - `PROFILE_PREPARE_CREDIT_COST`
 - `SPONSORED_PROFILE_PREPARE_AMOUNT`
+- `ARAYANLAR_PREPARE_CREDIT_COST`
+- `SPONSORED_ARAYANLAR_PREPARE_AMOUNT`
+- `HOST_PACK_REGEN_MAX`
+- `HOST_PACK_REGEN_WINDOW_MS`
+- `DEV_WEB_PORT` (optional; `scripts/dev.ts` also accepts `-p` / `--port`)
 - `AI_WORKER_POLL_MS`
 
 ### 3. Install, migrate, run
@@ -88,7 +94,19 @@ npm run bootstrap:admin -- you@example.com
 
 Normal signup cannot choose `ADMIN` or a paid plan.
 
-### 5. Optional capability seed (dev only)
+### 5. Bootstrap host (M2.2)
+
+Use an existing **verified** account identity (email is never hardcoded):
+
+```bash
+npm run bootstrap:host -- host@example.com
+# optional granter:
+npm run bootstrap:host -- host@example.com --by admin@example.com
+```
+
+Then an admin assigns applications at `/sunucu/basvurular` or via `POST /api/admin/arayanlar`.
+
+### 6. Optional capability seed (dev only)
 
 ```bash
 npm run seed:capability -- you@example.com ai.profile.prepare
@@ -100,6 +118,7 @@ npm run seed:capability -- you@example.com ai.profile.prepare
 npm run typecheck
 npm test
 npm run build
+npm run live:verify:m22   # requires OPENAI_API_KEY + AI_PROVIDER=openai
 ```
 
 ## Product UI language
@@ -112,5 +131,6 @@ Member-facing UI is Turkish. Engineering docs and code identifiers are English.
 - [Architecture](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
 - [Credits ledger](docs/credits.md)
+- [Arayanlar preparation](docs/arayanlar.md)
 - [Catchylabs integration](docs/catchylabs-integration.md)
 - [Build brief](PodTest_Network_Cursor_Build_Brief.md)

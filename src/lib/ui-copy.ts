@@ -7,6 +7,8 @@ export const ui = {
     home: "Ana sayfa",
     members: "Üyeler",
     profile: "Profilim",
+    arayanlar: "Arayanlar",
+    host: "Sunucu",
     admin: "Yönetim",
     signIn: "Giriş",
     signUp: "Kayıt ol",
@@ -17,7 +19,8 @@ export const ui = {
     lead: "Yazılım, kalite, mühendislik ve kariyer etrafında açık bir topluluk. Herkes katılabilir; üyelik için başvuru, mülakat veya test görevi yok.",
     ctaJoin: "Katıl",
     ctaBrowse: "Üyelere göz at",
-    laterNote: "Yapay zekâ asistanı, PodTest+, mesajlaşma ve Catchylabs bağlantısı yol haritasında — henüz burada değil.",
+    ctaArayanlar: "PodTest Arayanlar'a katıl",
+    laterNote: "Mesajlaşma, ödemeler ve Catchylabs bağlantısı yol haritasında — henüz burada değil.",
   },
   auth: {
     registerTitle: "Hesap oluştur",

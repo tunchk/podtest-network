@@ -237,3 +237,72 @@ export async function releaseJobReservation(jobId: string) {
     });
   });
 }
+
+export const ARAYANLAR_PREPARE_CREDIT_COST = Number(
+  process.env.ARAYANLAR_PREPARE_CREDIT_COST ?? "1",
+);
+
+export const SPONSORED_ARAYANLAR_PREPARE_AMOUNT = Number(
+  process.env.SPONSORED_ARAYANLAR_PREPARE_AMOUNT ?? "1",
+);
+
+/**
+ * One-time sponsored Arayanlar preparation grant (separate from CV/profile grant).
+ * Idempotent: sponsored:ai.arayanlar.prepare:v1:{userId}
+ */
+export async function ensureSponsoredArayanlarPrepareGrant(userId: string) {
+  const idempotencyKey = `sponsored:ai.arayanlar.prepare:v1:${userId}`;
+
+  const existing = await prisma.creditLot.findUnique({ where: { idempotencyKey } });
+  if (existing) {
+    return existing;
+  }
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const lot = await tx.creditLot.create({
+        data: {
+          userId,
+          source: "SPONSORED_ARAYANLAR_PREPARE",
+          idempotencyKey,
+          originalAmount: SPONSORED_ARAYANLAR_PREPARE_AMOUNT,
+          remainingAmount: SPONSORED_ARAYANLAR_PREPARE_AMOUNT,
+          reservedAmount: 0,
+          expiresAt: null,
+          provenance: "one-time-sponsored-m2.2-arayanlar",
+        },
+      });
+
+      await tx.creditLedgerEntry.create({
+        data: {
+          userId,
+          lotId: lot.id,
+          type: "GRANT",
+          amount: SPONSORED_ARAYANLAR_PREPARE_AMOUNT,
+          idempotencyKey: `grant:${idempotencyKey}`,
+        },
+      });
+
+      return lot;
+    });
+  } catch (error) {
+    const raced = await prisma.creditLot.findUnique({ where: { idempotencyKey } });
+    if (raced) return raced;
+    throw error;
+  }
+}
+
+/**
+ * Available balance for Arayanlar should include all lots (same wallet),
+ * but grant is only issued after cost confirmation / start.
+ */
+export async function getAvailableCreditBalanceForArayanlar(userId: string) {
+  const lots = await prisma.creditLot.findMany({
+    where: {
+      userId,
+      remainingAmount: { gt: 0 },
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    },
+  });
+  return lots.reduce((sum, lot) => sum + (lot.remainingAmount - lot.reservedAmount), 0);
+}

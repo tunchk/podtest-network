@@ -1,0 +1,9 @@
+-- Milestone 2.2 part A: enum extensions (must commit before use on some PG versions)
+
+CREATE TYPE "ArayanlarApplicationStatus" AS ENUM ('DRAFT', 'AWAITING_CONFIRMATION', 'SUBMITTED', 'WITHDRAWN');
+CREATE TYPE "ArayanlarPrepStatus" AS ENUM ('NOT_STARTED', 'QUEUED', 'RUNNING', 'READY', 'FAILED', 'CANCELLED');
+CREATE TYPE "ArayanlarArtifactKind" AS ENUM ('GUEST_BRIEF', 'HOST_PACK');
+
+ALTER TYPE "AiJobKind" ADD VALUE 'ARAYANLAR_PREPARE';
+ALTER TYPE "CreditLotSource" ADD VALUE 'SPONSORED_ARAYANLAR_PREPARE';
+ALTER TYPE "CreditLotSource" ADD VALUE 'PLATFORM_HOST_ARAYANLAR';

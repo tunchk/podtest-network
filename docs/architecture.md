@@ -10,6 +10,7 @@ Modular monolith (logical boundaries, single Next.js app):
 | Moderation (manual + assistive) | `PublicationReview`, `AutomatedContentReview`, `/yonetim` |
 | Private CV storage | `storage/private/**`, `src/lib/cv/*`, `/api/cv` |
 | AI jobs | `src/lib/ai/*`, `/api/ai/profile-prepare`, `scripts/ai-worker.ts` |
+| Arayanlar preparation | `src/lib/arayanlar/*`, `/arayanlar`, `/sunucu/basvurular` |
 | Credits ledger | `src/lib/credits/ledger.ts` |
 | Entitlements | `src/lib/capabilities/*` |
 | Catchylabs boundary | `src/lib/integrations/catchylabs.ts` |
@@ -24,13 +25,16 @@ Modular monolith (logical boundaries, single Next.js app):
 - Applying AI suggestions updates private draft only.
 - Capability evaluation denies unknown keys.
 - Credit ledger operations are server-side and idempotent per job.
+- Host access requires server-owned `HostAuthorization` **and** per-application assignment. Paid plans / HIRING never grant host access.
+- Guest APIs and pages never return host-pack fields (including nested job payloads).
 
 ## AI worker
 
-- `npm run dev` runs Next.js and `scripts/ai-worker.ts` via concurrently.
+- `npm run dev` runs Next.js and `scripts/ai-worker.ts` via `scripts/dev.ts` (handles `-p` / `--port` without leaking stray args into concurrently).
 - `npm run worker` / `npm run worker:once` for dedicated processes.
 - Worker loads `.env` then `.env.local` through `loadAppEnvironment()` — the same files intended for the app. Vitest stub overrides live only in `tests/setup.ts` and do not belong in `.env.local`.
 - Jobs use lease-based claiming (`FOR UPDATE SKIP LOCKED`) with crash recovery.
+- `ARAYANLAR_PREPARE` completes atomically only when both guest brief and host pack validate and persist.
 - Production (`NODE_ENV=production`) never executes stubs, even if `AI_ALLOW_STUB`, `AI_DEMO_STUB`, or `AI_PROVIDER=stub` are set.
 
 ## Automated publication review

@@ -4,16 +4,19 @@ import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { logoutAction } from "@/app/actions";
 import { isStaffRole } from "@/lib/session";
+import { isAuthorizedHost } from "@/lib/arayanlar/host-auth";
 
 export async function SiteHeader() {
   const session = await getSession();
   let staff = false;
+  let host = false;
   if (session?.user?.id) {
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
       select: { staffRole: true },
     });
     staff = Boolean(user && isStaffRole(user.staffRole, ["ADMIN", "MODERATOR"]));
+    host = await isAuthorizedHost(session.user.id);
   }
 
   return (
@@ -28,9 +31,17 @@ export async function SiteHeader() {
           </Link>
           {session?.user ? (
             <>
+              <Link href="/arayanlar" className="hover:text-[var(--ink)]">
+                {ui.nav.arayanlar}
+              </Link>
               <Link href="/hesabim/profil" className="hover:text-[var(--ink)]">
                 {ui.nav.profile}
               </Link>
+              {host || staff ? (
+                <Link href="/sunucu/basvurular" className="hover:text-[var(--ink)]">
+                  {ui.nav.host}
+                </Link>
+              ) : null}
               {staff ? (
                 <Link href="/yonetim" className="hover:text-[var(--ink)]">
                   {ui.nav.admin}

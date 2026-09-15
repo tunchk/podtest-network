@@ -17,6 +17,9 @@ import { profileSuggestionSchema } from "@/lib/ai/suggestion-schema";
 import { draftFromProfile } from "@/lib/profiles/types";
 import { updateOwnedProfileDraft } from "@/lib/profiles/service";
 import { sanitizeExternalUrl } from "@/lib/security/urls";
+import { generateArayanlarPreparation } from "@/lib/arayanlar/provider";
+import { arayanlarPrepareOutputSchema } from "@/lib/arayanlar/artifact-schema";
+import type { SubmittedFacts } from "@/lib/arayanlar/constants";
 import type { Prisma } from "@/generated/prisma/client";
 
 export async function quoteProfilePrepare(userId: string) {
@@ -250,6 +253,27 @@ export async function processClaimedJob(jobId: string, workerId: string) {
     return;
   }
 
+  if (job.kind === "ARAYANLAR_PREPARE") {
+    await processArayanlarPrepareJob(jobId, workerId);
+    return;
+  }
+
+  await processProfilePrepareJob(jobId, workerId);
+}
+
+async function processProfilePrepareJob(jobId: string, workerId: string) {
+  const job = await prisma.aiJob.findUnique({ where: { id: jobId } });
+  if (!job || job.leaseOwner !== workerId) return;
+  if (job.status === "CANCELLED") {
+    await releaseJobReservation(jobId);
+    return;
+  }
+
+  if (!job.profileId) {
+    await failJob(jobId, "profile_missing", "Profil bulunamadı.");
+    return;
+  }
+
   const profile = await prisma.profile.findUnique({ where: { id: job.profileId } });
   if (!profile) {
     await failJob(jobId, "profile_missing", "Profil bulunamadı.");
@@ -333,6 +357,274 @@ export async function processClaimedJob(jobId: string, workerId: string) {
   });
 
   await settleJobReservation(jobId);
+}
+
+/**
+ * Atomic dual-artifact completion for Arayanlar.
+ * Partial failure must not mark preparation READY or settle guest credits (except platform regen cost 0).
+ */
+async function processArayanlarPrepareJob(jobId: string, workerId: string) {
+  const job = await prisma.aiJob.findUnique({ where: { id: jobId } });
+  if (!job || job.leaseOwner !== workerId) return;
+  if (job.status === "CANCELLED") {
+    if (job.creditCostSnapshot > 0) await releaseJobReservation(jobId);
+    return;
+  }
+
+  if (!job.arayanlarApplicationId) {
+    await failArayanlarJob(jobId, "application_missing", "Başvuru bulunamadı.", job.creditCostSnapshot > 0);
+    return;
+  }
+
+  const application = await prisma.arayanlarApplication.findUnique({
+    where: { id: job.arayanlarApplicationId },
+  });
+  if (!application) {
+    await failArayanlarJob(jobId, "application_missing", "Başvuru bulunamadı.", job.creditCostSnapshot > 0);
+    return;
+  }
+
+  // Withdrawal / late results: ignore publication
+  if (application.status === "WITHDRAWN") {
+    await prisma.aiJob.update({
+      where: { id: jobId },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+        finishedAt: new Date(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        safeErrorCode: "withdrawn",
+        safeErrorMessage: "Başvuru geri çekildi; sonuç yayımlanmadı.",
+      },
+    });
+    if (job.creditCostSnapshot > 0) await releaseJobReservation(jobId);
+    return;
+  }
+
+  const isHostRegen = job.creditCostSnapshot === 0;
+  const revision = isHostRegen ? application.submittedRevision : job.profileDraftRevision;
+
+  if (!isHostRegen && application.submittedRevision !== revision) {
+    await failArayanlarJob(
+      jobId,
+      "revision_mismatch",
+      "Gönderim revizyonu değişti; sonuç yayımlanmadı.",
+      true,
+    );
+    await prisma.arayanlarApplication.update({
+      where: { id: application.id },
+      data: { prepStatus: "FAILED" },
+    });
+    return;
+  }
+
+  const facts = application.submittedFacts as SubmittedFacts | null;
+  if (!facts) {
+    await failArayanlarJob(jobId, "facts_missing", "Onaylı gerçekler eksik.", job.creditCostSnapshot > 0);
+    return;
+  }
+
+  await prisma.arayanlarApplication.update({
+    where: { id: application.id },
+    data: { prepStatus: isHostRegen ? application.prepStatus : "RUNNING" },
+  });
+
+  await prisma.aiJob.updateMany({
+    where: { id: jobId, leaseOwner: workerId, status: "RUNNING" },
+    data: { leaseExpiresAt: new Date(Date.now() + LEASE_MS) },
+  });
+
+  const result = await generateArayanlarPreparation({
+    facts,
+    editorialTemplateVersion: application.editorialTemplateVersion,
+  });
+
+  const latest = await prisma.aiJob.findUnique({ where: { id: jobId } });
+  const latestApp = await prisma.arayanlarApplication.findUnique({
+    where: { id: application.id },
+  });
+  if (!latest || latest.status === "CANCELLED" || latestApp?.status === "WITHDRAWN") {
+    if (job.creditCostSnapshot > 0) await releaseJobReservation(jobId);
+    return;
+  }
+  if (latest.leaseOwner !== workerId) return;
+
+  if (!result.ok) {
+    if (latest.attemptCount >= latest.maxAttempts || result.code === "provider_unavailable") {
+      await failArayanlarJob(jobId, result.code, result.message, job.creditCostSnapshot > 0, result.mode);
+      if (!isHostRegen) {
+        await prisma.arayanlarApplication.update({
+          where: { id: application.id },
+          data: { prepStatus: "FAILED" },
+        });
+      }
+    } else {
+      await prisma.aiJob.update({
+        where: { id: jobId },
+        data: {
+          status: "QUEUED",
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          safeErrorCode: result.code,
+          safeErrorMessage: result.message,
+          providerMode: result.mode,
+        },
+      });
+      if (!isHostRegen) {
+        await prisma.arayanlarApplication.update({
+          where: { id: application.id },
+          data: { prepStatus: "QUEUED" },
+        });
+      }
+    }
+    return;
+  }
+
+  const validated = arayanlarPrepareOutputSchema.safeParse(result.output);
+  if (!validated.success) {
+    await failArayanlarJob(jobId, "schema_mismatch", "Çıktı doğrulanamadı.", job.creditCostSnapshot > 0, result.mode);
+    if (!isHostRegen) {
+      await prisma.arayanlarApplication.update({
+        where: { id: application.id },
+        data: { prepStatus: "FAILED" },
+      });
+    }
+    return;
+  }
+
+  // Atomic completion: both artifacts + job READY (+ settle) or nothing published as ready.
+  try {
+    await prisma.$transaction(async (tx) => {
+      const appNow = await tx.arayanlarApplication.findUnique({ where: { id: application.id } });
+      if (!appNow || appNow.status === "WITHDRAWN") {
+        throw new Error("WITHDRAWN");
+      }
+      if (!isHostRegen && appNow.submittedRevision !== revision) {
+        throw new Error("REVISION");
+      }
+
+      const existingHost = await tx.arayanlarArtifact.findUnique({
+        where: {
+          applicationId_kind_submittedRevision: {
+            applicationId: application.id,
+            kind: "HOST_PACK",
+            submittedRevision: revision,
+          },
+        },
+      });
+
+      await tx.arayanlarArtifact.upsert({
+        where: {
+          applicationId_kind_submittedRevision: {
+            applicationId: application.id,
+            kind: "GUEST_BRIEF",
+            submittedRevision: revision,
+          },
+        },
+        create: {
+          applicationId: application.id,
+          kind: "GUEST_BRIEF",
+          submittedRevision: revision,
+          editorialTemplateVersion: appNow.editorialTemplateVersion,
+          generatedJson: validated.data.guestBrief as unknown as Prisma.InputJsonValue,
+        },
+        update: isHostRegen
+          ? {}
+          : {
+              generatedJson: validated.data.guestBrief as unknown as Prisma.InputJsonValue,
+              editorialTemplateVersion: appNow.editorialTemplateVersion,
+            },
+      });
+
+      await tx.arayanlarArtifact.upsert({
+        where: {
+          applicationId_kind_submittedRevision: {
+            applicationId: application.id,
+            kind: "HOST_PACK",
+            submittedRevision: revision,
+          },
+        },
+        create: {
+          applicationId: application.id,
+          kind: "HOST_PACK",
+          submittedRevision: revision,
+          editorialTemplateVersion: appNow.editorialTemplateVersion,
+          generatedJson: validated.data.hostPack as unknown as Prisma.InputJsonValue,
+        },
+        update: {
+          generatedJson: validated.data.hostPack as unknown as Prisma.InputJsonValue,
+          editorialTemplateVersion: appNow.editorialTemplateVersion,
+          // Preserve host edits on regeneration
+          hostEditedJson: existingHost?.hostEditedJson ?? undefined,
+        },
+      });
+
+      await tx.aiJob.update({
+        where: { id: jobId },
+        data: {
+          status: "READY",
+          // Guest-safe summary only — never embed host pack in job.resultJson
+          resultJson: {
+            guestBriefReady: true,
+            hostPackReady: true,
+            submittedRevision: revision,
+            labeledStub: result.labeledStub,
+          } as Prisma.InputJsonValue,
+          providerMode: result.mode,
+          finishedAt: new Date(),
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          safeErrorCode: null,
+          safeErrorMessage: null,
+        },
+      });
+
+      if (!isHostRegen) {
+        await tx.arayanlarApplication.update({
+          where: { id: application.id },
+          data: { prepStatus: "READY" },
+        });
+      }
+    });
+  } catch {
+    await failArayanlarJob(jobId, "persist_failed", "Hazırlık kaydedilemedi.", job.creditCostSnapshot > 0, result.mode);
+    if (!isHostRegen) {
+      await prisma.arayanlarApplication.update({
+        where: { id: application.id },
+        data: { prepStatus: "FAILED" },
+      });
+    }
+    return;
+  }
+
+  if (job.creditCostSnapshot > 0) {
+    await settleJobReservation(jobId);
+  }
+}
+
+async function failArayanlarJob(
+  jobId: string,
+  code: string,
+  message: string,
+  releaseCredits: boolean,
+  mode?: string,
+) {
+  await prisma.aiJob.update({
+    where: { id: jobId },
+    data: {
+      status: "FAILED",
+      safeErrorCode: code,
+      safeErrorMessage: message,
+      providerMode: mode ?? null,
+      finishedAt: new Date(),
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    },
+  });
+  if (releaseCredits) {
+    await releaseJobReservation(jobId);
+  }
 }
 
 async function failJob(jobId: string, code: string, message: string, mode?: string) {

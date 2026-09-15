@@ -17,6 +17,9 @@ export default function HomePage() {
           <Link href="/uyeler" className="btn btn-ghost">
             {ui.landing.ctaBrowse}
           </Link>
+          <Link href="/arayanlar" className="btn btn-ghost">
+            {ui.landing.ctaArayanlar}
+          </Link>
         </div>
         <p className="mt-6 max-w-xl text-sm text-[var(--muted)]">{ui.landing.laterNote}</p>
       </div>
@@ -26,6 +29,13 @@ export default function HomePage() {
           <li>Hesap oluştur, isteğe bağlı profili doldur veya “Şimdilik geç”.</li>
           <li>Profilini taslak tut, incelemeye gönder, onay sonrası paylaş.</li>
           <li>Üye dizininde yalnızca onaylı ve keşfedilebilir profiller görünür.</li>
+          <li>
+            İsteğe bağlı{" "}
+            <Link href="/arayanlar" className="text-[var(--accent)]">
+              PodTest Arayanlar
+            </Link>{" "}
+            hazırlığı — üyelik için zorunlu değil.
+          </li>
           <li>İş arama / işe alma durumları yetki vermez; sadece senin işaretlerin.</li>
         </ul>
       </aside>
