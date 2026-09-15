@@ -1,0 +1,363 @@
+// PodTest Network — Prisma schema (Milestone 1 + 2.1)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum StaffRole {
+  MEMBER
+  MODERATOR
+  ADMIN
+}
+
+enum PublicationStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  UNPUBLISHED
+}
+
+enum ReviewDecisionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CapabilitySource {
+  PLAN
+  STAFF_GIFT
+  PROMOTIONAL
+  DEV_SEED
+}
+
+enum AiJobKind {
+  PROFILE_PREPARE
+}
+
+enum AiJobStatus {
+  QUEUED
+  RUNNING
+  READY
+  FAILED
+  CANCELLED
+}
+
+enum CreditLotSource {
+  SPONSORED_PROFILE_PREPARE
+  MONTHLY
+  PURCHASED
+  STAFF_GIFT
+}
+
+enum CreditEntryType {
+  GRANT
+  RESERVE
+  SETTLE
+  RELEASE
+}
+
+enum AutomatedReviewOutcome {
+  CLEAR
+  NEEDS_REVIEW
+  LIKELY_VIOLATION
+  UNAVAILABLE
+}
+
+enum CvExtractionStatus {
+  PENDING
+  OK
+  UNSUPPORTED
+  ENCRYPTED
+  EMPTY_SCANNED
+  MALFORMED
+  ERROR
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  staffRole     StaffRole @default(MEMBER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions         Session[]
+  accounts         Account[]
+  profile          Profile?
+  capabilityGrants CapabilityGrant[]
+  reviewsResolved  PublicationReview[] @relation("ReviewResolver")
+  cvDocuments      CvDocument[]
+  aiJobs           AiJob[]
+  creditLots       CreditLot[]
+  creditEntries    CreditLedgerEntry[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("verification")
+}
+
+model Profile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  displayName String
+  slug        String  @unique
+  headline    String?
+  bio         String?
+  skills      String[] @default([])
+  interests   String[] @default([])
+  experience  Json?
+  education   Json?
+  projects    Json?
+  languages   Json?
+  location    String?
+  workPreferences String?
+  publicLinks Json?
+
+  openToWork      Boolean @default(false)
+  hiring          Boolean @default(false)
+  openToProjects  Boolean @default(false)
+  discoverable    Boolean @default(true)
+
+  publicationStatus PublicationStatus @default(DRAFT)
+  published         Boolean           @default(false)
+  rejectionReason   String?
+
+  /// Approved public snapshot used for /u/[slug] and directory. Never expose draft diffs.
+  publicSnapshot Json?
+  approvedAt     DateTime?
+
+  /// Incremented on every private draft mutation for conflict detection with AI jobs.
+  draftRevision Int @default(0)
+
+  onboardingCompletedAt DateTime?
+  onboardingSkippedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reviews            PublicationReview[]
+  aiJobs             AiJob[]
+  automatedReviews   AutomatedContentReview[]
+
+  @@index([published, discoverable, publicationStatus])
+  @@index([slug])
+  @@map("profile")
+}
+
+model PublicationReview {
+  id        String @id @default(cuid())
+  profileId String
+  profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  status             ReviewDecisionStatus @default(PENDING)
+  submittedSnapshot  Json
+  submittedDraftRevision Int @default(0)
+  snapshotHash       String @default("")
+  moderationPolicyVersion String
+  reason             String?
+  reviewerId         String?
+  reviewer           User?    @relation("ReviewResolver", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  automatedReview AutomatedContentReview?
+
+  @@index([status, createdAt])
+  @@index([profileId])
+  @@map("publication_review")
+}
+
+model CapabilityGrant {
+  id            String           @id @default(cuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  capabilityKey String
+  source        CapabilitySource
+  planCode      String?
+  provenance    String
+  expiresAt     DateTime?
+  createdAt     DateTime         @default(now())
+  revokedAt     DateTime?
+
+  @@index([userId, capabilityKey])
+  @@map("capability_grant")
+}
+
+model ModerationPolicy {
+  version     String   @id
+  title       String
+  body        String
+  effectiveAt DateTime @default(now())
+
+  @@map("moderation_policy")
+}
+
+model CvDocument {
+  id               String             @id @default(cuid())
+  userId           String
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  originalFilename String
+  storedFilename   String
+  mimeType         String
+  byteSize         Int
+  sha256           String
+  extractionStatus CvExtractionStatus @default(PENDING)
+  extractionErrorCode String?
+  extractedTextChars  Int?
+  deletedAt        DateTime?
+  createdAt        DateTime           @default(now())
+
+  jobs AiJob[]
+
+  @@index([userId, createdAt])
+  @@map("cv_document")
+}
+
+model AiJob {
+  id                   String      @id @default(cuid())
+  userId               String
+  user                 User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profileId            String
+  profile              Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  kind                 AiJobKind
+  status               AiJobStatus @default(QUEUED)
+  attemptCount         Int         @default(0)
+  maxAttempts          Int         @default(3)
+  leaseOwner           String?
+  leaseExpiresAt       DateTime?
+  cvDocumentId         String?
+  cvDocument           CvDocument? @relation(fields: [cvDocumentId], references: [id], onDelete: SetNull)
+  /// Private storage path for input text (CV extract or paste). Never logged.
+  inputTextRelativePath String?
+  profileDraftRevision Int
+  creditCostSnapshot   Int
+  reservationEntryId   String?     @unique
+  resultJson           Json?
+  resultConflict       Boolean     @default(false)
+  safeErrorCode        String?
+  safeErrorMessage     String?
+  providerMode         String?
+  createdAt            DateTime    @default(now())
+  startedAt            DateTime?
+  finishedAt           DateTime?
+  cancelledAt          DateTime?
+  updatedAt            DateTime    @updatedAt
+
+  ledgerEntries CreditLedgerEntry[]
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@index([leaseExpiresAt])
+  @@map("ai_job")
+}
+
+model CreditLot {
+  id              String          @id @default(cuid())
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source          CreditLotSource
+  idempotencyKey  String          @unique
+  originalAmount  Int
+  remainingAmount Int
+  reservedAmount  Int             @default(0)
+  expiresAt       DateTime?
+  provenance      String
+  createdAt       DateTime        @default(now())
+
+  entries CreditLedgerEntry[]
+
+  @@index([userId, source])
+  @@map("credit_lot")
+}
+
+model CreditLedgerEntry {
+  id             String          @id @default(cuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lotId          String
+  lot            CreditLot       @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  type           CreditEntryType
+  amount         Int
+  jobId          String?
+  job            AiJob?          @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  idempotencyKey String          @unique
+  createdAt      DateTime        @default(now())
+
+  @@index([userId, createdAt])
+  @@index([jobId])
+  @@map("credit_ledger_entry")
+}
+
+model AutomatedContentReview {
+  id                   String                  @id @default(cuid())
+  publicationReviewId  String                  @unique
+  publicationReview    PublicationReview       @relation(fields: [publicationReviewId], references: [id], onDelete: Cascade)
+  profileId            String
+  profile              Profile                 @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  reviewedDraftRevision Int
+  snapshotHash         String
+  policyVersion        String
+  outcome              AutomatedReviewOutcome
+  reasonCodes          String[]                @default([])
+  summaryForAdmin      String
+  providerMode         String
+  createdAt            DateTime                @default(now())
+
+  @@index([profileId, createdAt])
+  @@map("automated_content_review")
+}
