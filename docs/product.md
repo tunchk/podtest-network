@@ -26,10 +26,19 @@ PodTest Network is an open community. Anyone can join. Membership does not requi
 
 ## Explicitly not implemented yet
 
-- Full Arayanlar preparation (guest/host packs) — see Milestone 2.2
-- Messaging, blocks, reports, Q&A feed
+- Questions/answers feed, expert invitations, jobs board
 - PodTest+ / Employer billing, credit sales, subscriptions
 - Live Catchylabs provisioning
+- Webinars
+
+## Milestone 2.2 behavior
+
+- Optional Arayanlar preparation with guest brief / assigned-host pack separation.
+
+## Milestone 3.1 behavior
+
+- Message requests, accept/reject/cancel, private conversations, blocks, reports, and staff moderation queue.
+- See `docs/messaging.md`.
 
 ## Public field allowlist
 

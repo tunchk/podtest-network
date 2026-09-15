@@ -54,6 +54,7 @@ export async function revokeHostAuthorization(userId: string) {
 
 /**
  * Assigned host for a non-withdrawn application, with live host authorization.
+ * Reassignment and withdrawal revoke access on subsequent checks (pages, APIs, exports).
  */
 export async function canHostAccessApplication(options: {
   hostUserId: string;
@@ -71,4 +72,20 @@ export async function canHostAccessApplication(options: {
     return { ok: false as const, reason: "not_authorized_host" };
   }
   return { ok: true as const, application: app };
+}
+
+/** Deny host-pack job result payloads to non-assigned callers. */
+export async function canHostReadPrepareJob(options: {
+  hostUserId: string;
+  jobId: string;
+}) {
+  const job = await prisma.aiJob.findUnique({ where: { id: options.jobId } });
+  if (!job || job.kind !== "ARAYANLAR_PREPARE") {
+    return { ok: false as const, reason: "not_found" };
+  }
+  if (!job.arayanlarApplicationId) return { ok: false as const, reason: "not_found" };
+  return canHostAccessApplication({
+    hostUserId: options.hostUserId,
+    applicationId: job.arayanlarApplicationId,
+  });
 }

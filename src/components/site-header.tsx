@@ -31,6 +31,9 @@ export async function SiteHeader() {
           </Link>
           {session?.user ? (
             <>
+              <Link href="/mesajlar" className="hover:text-[var(--ink)]">
+                {ui.nav.messages}
+              </Link>
               <Link href="/arayanlar" className="hover:text-[var(--ink)]">
                 {ui.nav.arayanlar}
               </Link>

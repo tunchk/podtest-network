@@ -4,6 +4,7 @@ import { getOwnerDraftPreviewBySlug } from "@/lib/profiles/preview";
 import { getSession } from "@/lib/session";
 import type { PublicProfileView } from "@/lib/profiles/types";
 import { sanitizeExternalUrl } from "@/lib/security/urls";
+import { MessageRequestButton } from "@/components/messaging/message-request-button";
 
 type Params = Promise<{ slug: string }>;
 type SearchParams = Promise<{ onizleme?: string }>;
@@ -100,13 +101,27 @@ export default async function PublicProfilePage({
   const { slug } = await params;
   const query = await searchParams;
   const publicResult = await getPublicProfileBySlug(slug);
+  const session = await getSession();
 
   if (publicResult) {
-    return <ProfileView view={publicResult.view} />;
+    const showMessageCta =
+      session?.user?.id &&
+      session.user.id !== publicResult.profile.userId;
+
+    return (
+      <div className="space-y-4">
+        <ProfileView view={publicResult.view} />
+        {showMessageCta ? (
+          <MessageRequestButton
+            recipientUserId={publicResult.profile.userId}
+            recipientName={publicResult.view.displayName}
+          />
+        ) : null}
+      </div>
+    );
   }
 
   if (query.onizleme === "1") {
-    const session = await getSession();
     const preview = await getOwnerDraftPreviewBySlug(slug, session?.user?.id ?? null);
     if (preview) {
       return <ProfileView view={preview.view} preview />;

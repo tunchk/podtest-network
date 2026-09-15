@@ -210,9 +210,12 @@ export function evaluateCapability(options: {
 
   const definition = CAPABILITY_CATALOG[key as CapabilityKey];
   if (options.baselinePlan && definition.plans.includes(options.baselinePlan)) {
-    // Documented FREE plan entitlements still require an explicit grant row in M1
-    // for auditable provenance, except we allow baseline FREE checks for tests
-    // via grants. Product code should call requireCapability which loads grants.
+    return {
+      allowed: true,
+      reason: "granted",
+      capabilityKey: key,
+      source: `baseline:${options.baselinePlan}`,
+    };
   }
 
   return {

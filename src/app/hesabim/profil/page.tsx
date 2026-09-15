@@ -97,6 +97,9 @@ export default async function ProfilePage() {
           <Link href={`/u/${profile.slug}?onizleme=1`} className="btn btn-secondary">
             {ui.profile.preview}
           </Link>
+          <Link href="/mesajlar" className="btn btn-ghost">
+            Mesaj tercihleri
+          </Link>
         </div>
       </div>
 

@@ -7,6 +7,7 @@ export const ui = {
     home: "Ana sayfa",
     members: "Üyeler",
     profile: "Profilim",
+    messages: "Mesajlar",
     arayanlar: "Arayanlar",
     host: "Sunucu",
     admin: "Yönetim",
@@ -20,7 +21,7 @@ export const ui = {
     ctaJoin: "Katıl",
     ctaBrowse: "Üyelere göz at",
     ctaArayanlar: "PodTest Arayanlar'a katıl",
-    laterNote: "Mesajlaşma, ödemeler ve Catchylabs bağlantısı yol haritasında — henüz burada değil.",
+    laterNote: "Ödemeler ve Catchylabs bağlantısı yol haritasında — henüz burada değil.",
   },
   auth: {
     registerTitle: "Hesap oluştur",

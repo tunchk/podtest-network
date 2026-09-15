@@ -41,6 +41,9 @@ export async function evaluateUserCapability(
   return evaluateCapability({
     capabilityKey,
     grants,
+    // Ordinary membership: FREE-plan catalog keys are entitled without a paid grant.
+    // PLUS/EMPLOYER-only keys still require an explicit grant (documented for M4+).
+    baselinePlan: "FREE",
   });
 }
 

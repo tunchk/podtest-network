@@ -6,6 +6,7 @@ import {
   EDITORIAL_TEMPLATE_VERSION,
   HOST_PACK_REGEN_MAX,
   HOST_PACK_REGEN_WINDOW_MS,
+  MAX_PREPARATION_QUESTIONS,
   type ConversationTurn,
   type DraftAnswers,
   type SubmittedFacts,
@@ -21,6 +22,10 @@ import {
 } from "@/lib/arayanlar/conversation";
 import { guestBriefSchema, hostPackSchema, type HostPack } from "@/lib/arayanlar/artifact-schema";
 import { canHostAccessApplication, isAuthorizedHost } from "@/lib/arayanlar/host-auth";
+import {
+  assertArayanlarChatLimits,
+  releaseArayanlarChatSlot,
+} from "@/lib/arayanlar/rate-limit";
 import {
   ensureSponsoredArayanlarPrepareGrant,
   getAvailableCreditBalanceForArayanlar,
@@ -139,65 +144,75 @@ export async function postConversationMessage(options: {
   if (app.status === "WITHDRAWN") throw new Error("WITHDRAWN");
   if (app.status === "SUBMITTED") throw new Error("ALREADY_SUBMITTED");
 
-  let answers = asDraftAnswers(app.draftAnswers);
-  let turns = asTurns(app.conversationTurns);
-  let questionsAsked = app.questionsAsked;
-
-  const lastAssistant = [...turns].reverse().find((t) => t.role === "assistant");
-  const key = (lastAssistant?.questionKey as QuestionKey | undefined) ?? nextQuestionKey(answers, questionsAsked);
-
-  if (!key) {
-    return finalizeAwaitingConfirmation(app.id, answers, turns, questionsAsked);
+  // Do not reset questionsAsked on resume — budget is durable on the application row.
+  if (app.questionsAsked >= MAX_PREPARATION_QUESTIONS && !options.skip) {
+    // Still allow reading state; further questions are blocked by planner.
   }
 
-  const memberText = options.skip ? "Atladım" : options.message.trim();
-  turns = [
-    ...turns,
-    {
-      role: "member",
-      content: memberText,
-      at: new Date().toISOString(),
-      questionKey: key,
-      skipped: Boolean(options.skip),
-    },
-  ];
+  assertArayanlarChatLimits(options.userId, options.skip ? 0 : options.message.length);
+  try {
+    let answers = asDraftAnswers(app.draftAnswers);
+    let turns = asTurns(app.conversationTurns);
+    let questionsAsked = app.questionsAsked;
 
-  answers = applyAnswerToDraft(answers, key, memberText, Boolean(options.skip));
-  questionsAsked += 1;
+    const lastAssistant = [...turns].reverse().find((t) => t.role === "assistant");
+    const key = (lastAssistant?.questionKey as QuestionKey | undefined) ?? nextQuestionKey(answers, questionsAsked);
 
-  const nextKey = nextQuestionKey(answers, questionsAsked);
-  if (!nextKey || conversationComplete(answers, questionsAsked, false)) {
+    if (!key) {
+      return finalizeAwaitingConfirmation(app.id, answers, turns, questionsAsked);
+    }
+
+    const memberText = options.skip ? "Atladım" : options.message.trim();
+    turns = [
+      ...turns,
+      {
+        role: "member",
+        content: memberText,
+        at: new Date().toISOString(),
+        questionKey: key,
+        skipped: Boolean(options.skip),
+      },
+    ];
+
+    answers = applyAnswerToDraft(answers, key, memberText, Boolean(options.skip));
+    questionsAsked += 1;
+
+    const nextKey = nextQuestionKey(answers, questionsAsked);
+    if (!nextKey || conversationComplete(answers, questionsAsked, false)) {
+      turns = [
+        ...turns,
+        {
+          role: "assistant",
+          content:
+            "Teşekkürler. Kısa sorular tamam. Göndermeden önce paylaşılacak gerçekleri kontrol edebilirsin.",
+          at: new Date().toISOString(),
+        },
+      ];
+      return finalizeAwaitingConfirmation(app.id, answers, turns, questionsAsked);
+    }
+
     turns = [
       ...turns,
       {
         role: "assistant",
-        content:
-          "Teşekkürler. Kısa sorular tamam. Göndermeden önce paylaşılacak gerçekleri kontrol edebilirsin.",
+        content: promptForQuestion(nextKey),
         at: new Date().toISOString(),
+        questionKey: nextKey,
       },
     ];
-    return finalizeAwaitingConfirmation(app.id, answers, turns, questionsAsked);
+
+    return prisma.arayanlarApplication.update({
+      where: { id: app.id },
+      data: {
+        status: "DRAFT",
+        draftAnswers: answers as Prisma.InputJsonValue,
+        conversationTurns: turns as unknown as Prisma.InputJsonValue,
+        questionsAsked,
+      },
+    });
+  } finally {
+    releaseArayanlarChatSlot(options.userId);
   }
-
-  turns = [
-    ...turns,
-    {
-      role: "assistant",
-      content: promptForQuestion(nextKey),
-      at: new Date().toISOString(),
-      questionKey: nextKey,
-    },
-  ];
-
-  return prisma.arayanlarApplication.update({
-    where: { id: app.id },
-    data: {
-      status: "DRAFT",
-      draftAnswers: answers as Prisma.InputJsonValue,
-      conversationTurns: turns as unknown as Prisma.InputJsonValue,
-      questionsAsked,
-    },
-  });
 }
 
 async function finalizeAwaitingConfirmation(

@@ -11,6 +11,7 @@ Modular monolith (logical boundaries, single Next.js app):
 | Private CV storage | `storage/private/**`, `src/lib/cv/*`, `/api/cv` |
 | AI jobs | `src/lib/ai/*`, `/api/ai/profile-prepare`, `scripts/ai-worker.ts` |
 | Arayanlar preparation | `src/lib/arayanlar/*`, `/arayanlar`, `/sunucu/basvurular` |
+| Messaging | `src/lib/messaging/*`, `/mesajlar`, `/api/mesajlar/*` |
 | Credits ledger | `src/lib/credits/ledger.ts` |
 | Entitlements | `src/lib/capabilities/*` |
 | Catchylabs boundary | `src/lib/integrations/catchylabs.ts` |
@@ -27,6 +28,8 @@ Modular monolith (logical boundaries, single Next.js app):
 - Credit ledger operations are server-side and idempotent per job.
 - Host access requires server-owned `HostAuthorization` **and** per-application assignment. Paid plans / HIRING never grant host access.
 - Guest APIs and pages never return host-pack fields (including nested job payloads).
+- Messaging: membership and blocks are enforced server-side; client participant IDs are never trusted.
+- Moderation staff roles (`ADMIN`/`MODERATOR`) are required for report queues — host authorization alone is insufficient.
 
 ## AI worker
 

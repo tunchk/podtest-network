@@ -127,6 +127,19 @@ model User {
   assignedApplications  ArayanlarApplication[] @relation("ArayanlarAssignedHost")
   hostGrantsIssued      HostAuthorization[]    @relation("HostGrantIssuer")
 
+  messagingPreferences MessagingPreferences?
+  messageRequestsSent     MessageRequest[] @relation("MessageRequestSender")
+  messageRequestsReceived MessageRequest[] @relation("MessageRequestRecipient")
+  conversationParts       ConversationParticipant[]
+  messagesSent            DirectMessage[]  @relation("MessageSender")
+  blocksCreated           MemberBlock[]    @relation("Blocker")
+  blocksReceived          MemberBlock[]    @relation("Blocked")
+  contentReportsFiled     ContentReport[]  @relation("ReportReporter")
+  moderationDecisions     ModerationDecision[] @relation("ModerationActor")
+  moderationAccessLogs    ModerationAccessLog[]
+  messageQuotaUses        MessageRequestQuotaUse[]
+  messageRateBuckets      MessageRateBucket[]
+
   @@map("user")
 }
 
@@ -464,4 +477,277 @@ model ArayanlarArtifact {
   @@unique([applicationId, kind, submittedRevision])
   @@index([applicationId, kind])
   @@map("arayanlar_artifact")
+}
+
+enum MessageRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum ConversationMessagingState {
+  ACTIVE
+  PAUSED
+}
+
+enum DirectMessageDeliveryStatus {
+  DELIVERED
+  HELD
+  REJECTED_PRE_DELIVERY
+  REMOVED
+}
+
+enum ReportTargetType {
+  MESSAGE_REQUEST
+  MESSAGE
+  PROFILE
+}
+
+enum ReportStatus {
+  OPEN
+  DISMISSED
+  ACTIONED
+}
+
+enum ModerationCaseStatus {
+  OPEN
+  DISMISSED
+  ACTIONED
+}
+
+enum ModerationHoldKind {
+  MESSAGE_REQUEST
+  MESSAGE
+}
+
+enum ModerationHoldStatus {
+  HELD
+  RELEASED
+  REJECTED
+}
+
+/// Member contact / messaging preferences (server-enforced).
+model MessagingPreferences {
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  acceptMessageRequests Boolean @default(true)
+  /// Temporary platform restriction from moderation (blocks sending/requesting).
+  messagingRestrictedUntil DateTime?
+
+  updatedAt DateTime @updatedAt
+
+  @@map("messaging_preferences")
+}
+
+model MessageRequest {
+  id          String               @id @default(cuid())
+  senderId    String
+  sender      User                 @relation("MessageRequestSender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipientId String
+  recipient   User                 @relation("MessageRequestRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  /// Lexicographically sorted "low:high" member pair key.
+  pairKey     String
+  status      MessageRequestStatus @default(PENDING)
+  introduction String
+  idempotencyKey String
+  /// Resumption of a paused conversation after unblock (reuses history).
+  isResumption Boolean @default(false)
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+  updatedAt   DateTime @updatedAt
+
+  @@unique([senderId, idempotencyKey])
+  @@index([recipientId, status, createdAt])
+  @@index([senderId, status, createdAt])
+  @@index([pairKey, status])
+  @@map("message_request")
+}
+
+model Conversation {
+  id                 String                     @id @default(cuid())
+  participantLowId   String
+  participantHighId  String
+  messagingState     ConversationMessagingState @default(ACTIVE)
+  lastMessageAt      DateTime?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+
+  participants ConversationParticipant[]
+  messages     DirectMessage[]
+  requests     MessageRequest[]
+
+  @@unique([participantLowId, participantHighId])
+  @@index([lastMessageAt])
+  @@map("conversation")
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Monotonic watermark: only advance lastReadCreatedAt / lastReadMessageId forward.
+  lastReadMessageId  String?
+  lastReadCreatedAt  DateTime?
+  joinedAt       DateTime @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_participant")
+}
+
+model DirectMessage {
+  id             String                     @id @default(cuid())
+  conversationId String
+  conversation   Conversation              @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User                       @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  body           String?
+  deliveryStatus DirectMessageDeliveryStatus @default(DELIVERED)
+  removedPlaceholder String?
+  idempotencyKey String
+  createdAt      DateTime @default(now())
+
+  @@unique([senderId, idempotencyKey])
+  @@index([conversationId, createdAt, id])
+  @@map("direct_message")
+}
+
+model MemberBlock {
+  id        String   @id @default(cuid())
+  blockerId String
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+  @@map("member_block")
+}
+
+model MessageRequestCooldown {
+  pairKey   String   @id
+  until     DateTime
+  reason    String
+  updatedAt DateTime @updatedAt
+
+  @@map("message_request_cooldown")
+}
+
+model MessageRequestQuotaUse {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  yearMonth      String
+  requestId      String?
+  idempotencyKey String
+  createdAt      DateTime @default(now())
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, yearMonth])
+  @@map("message_request_quota_use")
+}
+
+/// Sliding window send rate limiting (per-minute buckets).
+model MessageRateBucket {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bucketKey String
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, bucketKey])
+  @@map("message_rate_bucket")
+}
+
+model ContentReport {
+  id            String          @id @default(cuid())
+  reporterId    String
+  reporter      User            @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetType    ReportTargetType
+  targetId      String
+  reasonCode    String
+  explanation   String?
+  /// Minimal evidence for review — not full conversation/CV.
+  evidenceSnapshot Json
+  status        ReportStatus    @default(OPEN)
+  dedupeKey     String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  moderationCase ModerationCase?
+
+  @@unique([reporterId, dedupeKey])
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@map("content_report")
+}
+
+model ModerationCase {
+  id         String               @id @default(cuid())
+  reportId   String               @unique
+  report     ContentReport        @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  status     ModerationCaseStatus @default(OPEN)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+
+  decisions ModerationDecision[]
+  holds     ModerationHold[]
+
+  @@index([status, createdAt])
+  @@map("moderation_case")
+}
+
+model ModerationDecision {
+  id        String         @id @default(cuid())
+  caseId    String
+  case      ModerationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  actorId   String
+  actor     User           @relation("ModerationActor", fields: [actorId], references: [id], onDelete: Restrict)
+  action    String
+  note      String?
+  createdAt DateTime       @default(now())
+
+  @@index([caseId, createdAt])
+  @@map("moderation_decision")
+}
+
+model ModerationHold {
+  id              String               @id @default(cuid())
+  kind            ModerationHoldKind
+  status          ModerationHoldStatus @default(HELD)
+  /// Pending payload until release creates/delivers the real record.
+  payload         Json
+  senderId        String
+  recipientId     String?
+  conversationId  String?
+  idempotencyKey  String?
+  caseId          String?
+  case            ModerationCase?      @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  createdAt       DateTime             @default(now())
+  resolvedAt      DateTime?
+
+  @@index([status, createdAt])
+  @@index([senderId, status])
+  @@map("moderation_hold")
+}
+
+model ModerationAccessLog {
+  id        String   @id @default(cuid())
+  actorId   String
+  actor     User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  action    String
+  targetType String
+  targetId  String
+  createdAt DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@map("moderation_access_log")
 }

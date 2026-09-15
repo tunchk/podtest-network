@@ -66,6 +66,13 @@ Environment variable **names** used:
 - `SPONSORED_ARAYANLAR_PREPARE_AMOUNT`
 - `HOST_PACK_REGEN_MAX`
 - `HOST_PACK_REGEN_WINDOW_MS`
+- `MESSAGE_REQUEST_FREE_MONTHLY_ALLOWANCE`
+- `MESSAGE_REQUEST_PLUS_MONTHLY_ALLOWANCE`
+- `MESSAGE_REQUEST_EMPLOYER_MONTHLY_ALLOWANCE`
+- `MESSAGE_REQUEST_COOLDOWN_DAYS`
+- `MESSAGE_REQUEST_MAX_CHARS`
+- `DIRECT_MESSAGE_MAX_CHARS`
+- `MESSAGE_SENDS_PER_MINUTE`
 - `DEV_WEB_PORT` (optional; `scripts/dev.ts` also accepts `-p` / `--port`)
 - `AI_WORKER_POLL_MS`
 
@@ -132,5 +139,6 @@ Member-facing UI is Turkish. Engineering docs and code identifiers are English.
 - [Roadmap](docs/roadmap.md)
 - [Credits ledger](docs/credits.md)
 - [Arayanlar preparation](docs/arayanlar.md)
+- [Messaging](docs/messaging.md)
 - [Catchylabs integration](docs/catchylabs-integration.md)
 - [Build brief](PodTest_Network_Cursor_Build_Brief.md)

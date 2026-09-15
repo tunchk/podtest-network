@@ -52,6 +52,25 @@ describe("capability evaluator", () => {
     expect(result.reason).toBe("expired");
   });
 
+  it("allows FREE baseline catalog keys without an explicit grant", () => {
+    const result = evaluateCapability({
+      capabilityKey: "network.message_request.create",
+      grants: [],
+      baselinePlan: "FREE",
+    });
+    expect(result.allowed).toBe(true);
+    expect(result.source).toBe("baseline:FREE");
+  });
+
+  it("still denies PLUS-only keys on FREE baseline", () => {
+    const result = evaluateCapability({
+      capabilityKey: "ai.profile.prepare",
+      grants: [],
+      baselinePlan: "FREE",
+    });
+    expect(result.allowed).toBe(false);
+  });
+
   it("documents PLUS and EMPLOYER future plan keys", () => {
     expect(CAPABILITY_CATALOG["catchy.practice.access"].plans).toContain("PLUS");
     expect(CAPABILITY_CATALOG["hiring.search.advanced"].plans).toContain("EMPLOYER");
