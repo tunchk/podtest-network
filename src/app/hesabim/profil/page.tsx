@@ -72,6 +72,17 @@ export default async function ProfilePage() {
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-3xl">{ui.profile.title}</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">{ui.profile.draftHint}</p>
+          <p className="mt-2 flex flex-wrap gap-3 text-sm">
+            <Link href="/hesabim/uzman" className="underline">
+              Uzman katılımı / SSS
+            </Link>
+            <Link href="/hesabim/gorunumler" className="underline">
+              Podcast görünümleri
+            </Link>
+            <Link href="/hesabim/eposta-dogrula" className="underline">
+              E-posta doğrulama
+            </Link>
+          </p>
         </div>
         <span className="badge">{statusLabel}</span>
       </div>

@@ -76,32 +76,84 @@ async function assertCanReportTarget(options: {
     };
   }
 
-  const message = await prisma.directMessage.findUnique({
-    where: { id: options.targetId },
-  });
-  if (!message) fail("NOT_FOUND");
-  const member = await prisma.conversationParticipant.findUnique({
-    where: {
-      conversationId_userId: {
-        conversationId: message.conversationId,
-        userId: options.reporterId,
+  if (options.targetType === "MESSAGE") {
+    const message = await prisma.directMessage.findUnique({
+      where: { id: options.targetId },
+    });
+    if (!message) fail("NOT_FOUND");
+    const member = await prisma.conversationParticipant.findUnique({
+      where: {
+        conversationId_userId: {
+          conversationId: message.conversationId,
+          userId: options.reporterId,
+        },
       },
-    },
-  });
-  if (!member) fail("FORBIDDEN");
-  if (message.deliveryStatus === "HELD") fail("FORBIDDEN");
+    });
+    if (!member) fail("FORBIDDEN");
+    if (message.deliveryStatus === "HELD") fail("FORBIDDEN");
 
-  return {
-    evidenceSnapshot: {
-      targetType: "MESSAGE",
-      messageId: message.id,
-      conversationId: message.conversationId,
-      deliveryStatus: message.deliveryStatus,
-      bodyPreview: (message.body ?? "").slice(0, 200),
-      createdAt: message.createdAt.toISOString(),
-    },
-    canonicalId: message.id,
-  };
+    return {
+      evidenceSnapshot: {
+        targetType: "MESSAGE",
+        messageId: message.id,
+        conversationId: message.conversationId,
+        deliveryStatus: message.deliveryStatus,
+        bodyPreview: (message.body ?? "").slice(0, 200),
+        createdAt: message.createdAt.toISOString(),
+      },
+      canonicalId: message.id,
+    };
+  }
+
+  if (options.targetType === "COMMUNITY_QUESTION") {
+    const q = await prisma.communityQuestion.findUnique({ where: { id: options.targetId } });
+    if (!q || q.status !== "PUBLISHED") fail("NOT_FOUND");
+    return {
+      evidenceSnapshot: {
+        targetType: "COMMUNITY_QUESTION",
+        questionId: q.id,
+        titlePreview: q.title.slice(0, 160),
+        bodyPreview: q.body.slice(0, 200),
+        authorId: q.authorId,
+        publishedRevision: q.publishedRevision,
+      },
+      canonicalId: q.id,
+    };
+  }
+
+  if (options.targetType === "COMMUNITY_ANSWER") {
+    const a = await prisma.communityAnswer.findUnique({ where: { id: options.targetId } });
+    if (!a || a.status !== "PUBLISHED") fail("NOT_FOUND");
+    return {
+      evidenceSnapshot: {
+        targetType: "COMMUNITY_ANSWER",
+        answerId: a.id,
+        questionId: a.questionId,
+        bodyPreview: a.body.slice(0, 200),
+        authorId: a.authorId,
+        publishedRevision: a.publishedRevision,
+      },
+      canonicalId: a.id,
+    };
+  }
+
+  if (options.targetType === "EXPERT_FAQ") {
+    const faq = await prisma.expertFaq.findUnique({ where: { id: options.targetId } });
+    if (!faq || faq.status !== "PUBLISHED") fail("NOT_FOUND");
+    return {
+      evidenceSnapshot: {
+        targetType: "EXPERT_FAQ",
+        faqId: faq.id,
+        questionPreview: faq.question.slice(0, 160),
+        answerPreview: faq.answer.slice(0, 200),
+        expertUserId: faq.expertUserId,
+        expertApprovedRevision: faq.expertApprovedRevision,
+      },
+      canonicalId: faq.id,
+    };
+  }
+
+  fail("INVALID_TARGET");
 }
 
 export async function createContentReport(options: {
@@ -243,6 +295,21 @@ export async function removeReportedContent(options: {
         where: { id: modCase.report.targetId, status: "PENDING" },
         data: { status: "CANCELLED", resolvedAt: new Date() },
       });
+    } else if (modCase.report.targetType === "COMMUNITY_QUESTION") {
+      await tx.communityQuestion.updateMany({
+        where: { id: modCase.report.targetId },
+        data: { status: "REMOVED_BY_MODERATOR", removedAt: new Date() },
+      });
+    } else if (modCase.report.targetType === "COMMUNITY_ANSWER") {
+      await tx.communityAnswer.updateMany({
+        where: { id: modCase.report.targetId },
+        data: { status: "REMOVED_BY_MODERATOR", removedAt: new Date() },
+      });
+    } else if (modCase.report.targetType === "EXPERT_FAQ") {
+      await tx.expertFaq.updateMany({
+        where: { id: modCase.report.targetId },
+        data: { status: "REMOVED", removedAt: new Date(), publishedAt: null },
+      });
     }
 
     await tx.moderationCase.update({
@@ -304,7 +371,51 @@ export async function releaseModerationHold(options: {
     body?: string;
     introduction?: string;
     isResumption?: boolean;
+    questionId?: string;
+    answerId?: string;
+    faqId?: string;
+    revision?: number;
+    title?: string;
   };
+
+  if (hold.kind === "COMMUNITY_QUESTION") {
+    if (!payload.questionId || payload.revision == null) fail("INVALID_HOLD");
+    const { publishHeldQuestionRevision } = await import("@/lib/community/questions");
+    await publishHeldQuestionRevision({
+      questionId: payload.questionId,
+      revision: payload.revision,
+    });
+    await prisma.moderationHold.update({
+      where: { id: hold.id },
+      data: { status: "RELEASED", resolvedAt: new Date() },
+    });
+    return { kind: "community_question" as const, questionId: payload.questionId };
+  }
+
+  if (hold.kind === "COMMUNITY_ANSWER") {
+    if (!payload.answerId || payload.revision == null) fail("INVALID_HOLD");
+    const { publishHeldAnswerRevision } = await import("@/lib/community/answers");
+    await publishHeldAnswerRevision({
+      answerId: payload.answerId,
+      revision: payload.revision,
+    });
+    await prisma.moderationHold.update({
+      where: { id: hold.id },
+      data: { status: "RELEASED", resolvedAt: new Date() },
+    });
+    return { kind: "community_answer" as const, answerId: payload.answerId };
+  }
+
+  if (hold.kind === "EXPERT_FAQ") {
+    if (!payload.faqId || payload.revision == null) fail("INVALID_HOLD");
+    const { publishHeldExpertFaq } = await import("@/lib/community/expert-faq");
+    await publishHeldExpertFaq({ faqId: payload.faqId, revision: payload.revision });
+    await prisma.moderationHold.update({
+      where: { id: hold.id },
+      data: { status: "RELEASED", resolvedAt: new Date() },
+    });
+    return { kind: "expert_faq" as const, faqId: payload.faqId };
+  }
 
   if (hold.kind === "MESSAGE") {
     if (!hold.conversationId || !hold.recipientId || !payload.body) fail("INVALID_HOLD");
@@ -354,6 +465,8 @@ export async function releaseModerationHold(options: {
     });
     return { kind: "message" as const, messageId: message.id };
   }
+
+  if (hold.kind !== "MESSAGE_REQUEST") fail("INVALID_HOLD");
 
   // MESSAGE_REQUEST hold — consume quota only on approval
   if (!hold.recipientId || !payload.introduction) fail("INVALID_HOLD");

@@ -12,6 +12,8 @@ Modular monolith (logical boundaries, single Next.js app):
 | AI jobs | `src/lib/ai/*`, `/api/ai/profile-prepare`, `scripts/ai-worker.ts` |
 | Arayanlar preparation | `src/lib/arayanlar/*`, `/arayanlar`, `/sunucu/basvurular` |
 | Messaging | `src/lib/messaging/*`, `/mesajlar`, `/api/mesajlar/*` |
+| Community Q&A / invitations / FAQs / episodes | `src/lib/community/*`, `/topluluk`, `/bolumler`, `/davet/konusmaci`, `/api/topluluk/*`, `/api/davet/*`, `/api/bolumler`, `/api/uzman` |
+| Email verification (local mail-sink) | `src/lib/auth/email-verification.ts`, `/hesabim/eposta-dogrula` |
 | Credits ledger | `src/lib/credits/ledger.ts` |
 | Entitlements | `src/lib/capabilities/*` |
 | Catchylabs boundary | `src/lib/integrations/catchylabs.ts` |
@@ -30,6 +32,9 @@ Modular monolith (logical boundaries, single Next.js app):
 - Guest APIs and pages never return host-pack fields (including nested job payloads).
 - Messaging: membership and blocks are enforced server-side; client participant IDs are never trusted.
 - Moderation staff roles (`ADMIN`/`MODERATOR`) are required for report queues — host authorization alone is insufficient.
+- Community Q&A reuses messaging blocks + report queue; speaker invitations are ADMIN-only and never grant staff/host privileges.
+- Email verification tokens are hashed; `emailVerified` is never set from a client claim.
+- Episode selectors and public APIs omit non-`PUBLISHED` episodes; appearance `adminVerifiedAt` is only set by admin paths.
 
 ## AI worker
 

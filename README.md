@@ -5,6 +5,8 @@ Open community around software, quality, engineering, careers, and the people be
 Milestone 1 delivers accounts, profiles, directory and manual publication moderation.
 Milestone 2.1 adds optional CV → AI profile suggestions, a durable worker, sponsored credits, and assistive automated review.
 Milestone 2.2 adds optional PodTest Arayanlar preparation (guest brief + assigned-host pack).
+Milestone 3.1 adds message requests, conversations, blocks and reports.
+Milestone 3.2 adds community Q&A, speaker invitations, expert FAQs and podcast episode appearances.
 
 ## Stack (verified at implementation time)
 
@@ -73,6 +75,9 @@ Environment variable **names** used:
 - `MESSAGE_REQUEST_MAX_CHARS`
 - `DIRECT_MESSAGE_MAX_CHARS`
 - `MESSAGE_SENDS_PER_MINUTE`
+- `COMMUNITY_QUESTION_TITLE_MAX` / `COMMUNITY_QUESTION_BODY_MAX` / `COMMUNITY_ANSWER_BODY_MAX`
+- `COMMUNITY_QUESTIONS_PER_DAY` / `COMMUNITY_ANSWERS_PER_DAY`
+- `SPEAKER_INVITATION_TTL_HOURS` / `EMAIL_VERIFICATION_TTL_HOURS`
 - `DEV_WEB_PORT` (optional; `scripts/dev.ts` also accepts `-p` / `--port`)
 - `AI_WORKER_POLL_MS`
 
@@ -140,5 +145,6 @@ Member-facing UI is Turkish. Engineering docs and code identifiers are English.
 - [Credits ledger](docs/credits.md)
 - [Arayanlar preparation](docs/arayanlar.md)
 - [Messaging](docs/messaging.md)
+- [Community (Q&A, invitations, FAQs, episodes)](docs/community.md)
 - [Catchylabs integration](docs/catchylabs-integration.md)
 - [Build brief](PodTest_Network_Cursor_Build_Brief.md)

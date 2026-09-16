@@ -6,9 +6,13 @@ import { ui } from "@/lib/ui-copy";
 import { catchylabsIntegration } from "@/lib/integrations/catchylabs";
 import { prisma } from "@/lib/db";
 import { automatedReviewMatches } from "@/lib/moderation/automated-review";
+import { listSpeakerInvitations } from "@/lib/community/invitations";
+import { listAdminEpisodes, listPendingAppearancesForAdmin } from "@/lib/community/episodes";
+import { AdminCommunityPanel } from "@/components/community/admin-community-panel";
+import Link from "next/link";
 
 export default async function AdminPage() {
-  await requireStaff(["ADMIN", "MODERATOR"]);
+  const { user: staff } = await requireStaff(["ADMIN", "MODERATOR"]);
   const reviews = await listPendingReviews();
   const catchy = await catchylabsIntegration.getAccessStatus("admin-probe");
 
@@ -16,6 +20,16 @@ export default async function AdminPage() {
     where: { publicationReviewId: { in: reviews.map((r) => r.id) } },
   });
   const automatedByReview = new Map(automated.map((row) => [row.publicationReviewId, row]));
+
+  const isAdmin = staff.staffRole === "ADMIN";
+  let invitations: Awaited<ReturnType<typeof listSpeakerInvitations>> = [];
+  let episodes: Awaited<ReturnType<typeof listAdminEpisodes>> = [];
+  let pendingAppearances: Awaited<ReturnType<typeof listPendingAppearancesForAdmin>> = [];
+  if (isAdmin) {
+    invitations = await listSpeakerInvitations(staff.id);
+    episodes = await listAdminEpisodes(staff.id);
+    pendingAppearances = await listPendingAppearancesForAdmin(staff.id);
+  }
 
   return (
     <div className="space-y-6">
@@ -25,6 +39,11 @@ export default async function AdminPage() {
           {ui.admin.manualBanner} Yardımcı tarama kural tabanlıdır (OpenAI moderasyon
           entegrasyonu değildir). İnsan onayı zorunludur. Kullanılamayan tarama güvenli sayılmaz. Üye
           CV dosyaları burada gösterilmez.
+        </p>
+        <p className="mt-2 text-sm">
+          <Link href="/yonetim/moderasyon" className="underline">
+            Mesaj / içerik rapor kuyruğu
+          </Link>
         </p>
       </div>
 
@@ -115,6 +134,19 @@ export default async function AdminPage() {
         <p className="mt-2">Durum: {catchy.status}</p>
         <p className="mt-1">{catchy.message}</p>
       </section>
+
+      {isAdmin ? (
+        <section className="panel">
+          <AdminCommunityPanel
+            invitations={invitations.map((i) => ({
+              ...i,
+              expiresAt: i.expiresAt.toISOString(),
+            }))}
+            episodes={episodes}
+            pendingAppearances={pendingAppearances}
+          />
+        </section>
+      ) : null}
     </div>
   );
 }

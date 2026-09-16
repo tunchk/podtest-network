@@ -6,6 +6,8 @@ export const ui = {
   nav: {
     home: "Ana sayfa",
     members: "Üyeler",
+    community: "Topluluk",
+    episodes: "Bölümler",
     profile: "Profilim",
     messages: "Mesajlar",
     arayanlar: "Arayanlar",
@@ -78,6 +80,19 @@ export const ui = {
     reject: "Reddet",
     reason: "Red nedeni",
     manualBanner: "Manuel moderasyon — otomatik içerik denetimi henüz yok.",
+  },
+  community: {
+    title: "Topluluk soruları",
+    lead: "İsteyen her üye soru sorabilir ve cevap yazabilir. CV, ilgi alanları veya genel profil zorunlu değildir. Katılım isteğe bağlıdır.",
+    ask: "Soru sor",
+    askTitle: "Soru sor",
+    askLead:
+      "Önce taslak olarak saklayabilirsin. Yayımlamadan önce içeriğin ve görünen adının kamuya açık olacağını onaylaman gerekir.",
+    empty: "Henüz yayımlanmış soru yok.",
+    episodes: "Podcast bölümleri",
+    episodesTitle: "Podcast bölümleri",
+    episodesLead:
+      "Yalnızca yönetici tarafından yayımlanmış bölümler listelenir. Dinleme bağlantıları haricidir; Spotify hesabı veya otomatik içe aktarma yoktur.",
   },
   common: {
     loading: "Yükleniyor…",

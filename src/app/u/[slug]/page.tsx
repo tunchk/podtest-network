@@ -5,6 +5,11 @@ import { getSession } from "@/lib/session";
 import type { PublicProfileView } from "@/lib/profiles/types";
 import { sanitizeExternalUrl } from "@/lib/security/urls";
 import { MessageRequestButton } from "@/components/messaging/message-request-button";
+import { listPublishedFaqsForExpert } from "@/lib/community/expert-faq";
+import { listPublicAppearancesForMember } from "@/lib/community/episodes";
+import { PlainTextWithLinks } from "@/components/community/plain-text-with-links";
+import { prisma } from "@/lib/db";
+import { ReportButton } from "@/components/community/report-button";
 
 type Params = Promise<{ slug: string }>;
 type SearchParams = Promise<{ onizleme?: string }>;
@@ -104,16 +109,105 @@ export default async function PublicProfilePage({
   const session = await getSession();
 
   if (publicResult) {
-    const showMessageCta =
-      session?.user?.id &&
-      session.user.id !== publicResult.profile.userId;
+    const userId = publicResult.profile.userId;
+    const showMessageCta = session?.user?.id && session.user.id !== userId;
+
+    const [faqs, appearances, expertBits] = await Promise.all([
+      listPublishedFaqsForExpert(userId),
+      listPublicAppearancesForMember(userId),
+      prisma.profile.findUnique({
+        where: { userId },
+        select: {
+          expertDiscussionAreas: true,
+          consultationUrl: true,
+          consultationPaid: true,
+          speakerParticipation: true,
+        },
+      }),
+    ]);
 
     return (
       <div className="space-y-4">
         <ProfileView view={publicResult.view} />
+        {expertBits &&
+      (expertBits.speakerParticipation ||
+        expertBits.expertDiscussionAreas.length > 0 ||
+        expertBits.consultationUrl) ? (
+          <section className="panel space-y-2">
+            <h2 className="font-[family-name:var(--font-display)] text-xl">Uzman katılımı</h2>
+            {expertBits.speakerParticipation ? (
+              <p className="text-sm text-[var(--muted)]">
+                Konuşmacı katılımı (mesleki yeterlilik doğrulaması değildir).
+              </p>
+            ) : null}
+            {expertBits.expertDiscussionAreas.length ? (
+              <p className="text-sm">Alanlar: {expertBits.expertDiscussionAreas.join(", ")}</p>
+            ) : null}
+            {expertBits.consultationUrl ? (
+              <p className="text-sm">
+                Danışmanlık:{" "}
+                <a
+                  href={expertBits.consultationUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                >
+                  harici bağlantı
+                </a>
+                {expertBits.consultationPaid ? " · ücretli hizmet" : null}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+        {faqs.length ? (
+          <section className="panel space-y-3">
+            <h2 className="font-[family-name:var(--font-display)] text-xl">SSS</h2>
+            <ul className="space-y-3">
+              {faqs.map((f) => (
+                <li key={f.id}>
+                  <p className="font-medium">{f.question}</p>
+                  <PlainTextWithLinks
+                    text={f.answer}
+                    className="mt-1 whitespace-pre-wrap text-sm text-[var(--muted)]"
+                  />
+                  {session?.user ? (
+                    <div className="mt-1">
+                      <ReportButton targetType="EXPERT_FAQ" targetId={f.id} />
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        {appearances.length ? (
+          <section className="panel space-y-3">
+            <h2 className="font-[family-name:var(--font-display)] text-xl">Podcast görünümleri</h2>
+            <ul className="space-y-2 text-sm">
+              {appearances.map((a) => (
+                <li key={a.id}>
+                  {a.episode.series} — {a.episode.title}
+                  {a.episode.listeningUrl ? (
+                    <>
+                      {" · "}
+                      <a
+                        href={a.episode.listeningUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline"
+                      >
+                        Dinle
+                      </a>
+                    </>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         {showMessageCta ? (
           <MessageRequestButton
-            recipientUserId={publicResult.profile.userId}
+            recipientUserId={userId}
             recipientName={publicResult.view.displayName}
           />
         ) : null}

@@ -140,6 +140,21 @@ model User {
   messageQuotaUses        MessageRequestQuotaUse[]
   messageRateBuckets      MessageRateBucket[]
 
+  communityQuestions      CommunityQuestion[]
+  communityAnswers        CommunityAnswer[]
+  communityQuotaUses      CommunityQuotaUse[]
+  speakerInvitationsCreated SpeakerInvitation[] @relation("SpeakerInvitationCreator")
+  speakerInvitationsConsumed SpeakerInvitation[] @relation("SpeakerInvitationConsumer")
+  emailVerificationTokens EmailVerificationToken[]
+  expertFaqs              ExpertFaq[]            @relation("ExpertFaqOwner")
+  expertFaqProposals      ExpertFaq[]            @relation("ExpertFaqProposer")
+  podcastEpisodesCreated  PodcastEpisode[]       @relation("PodcastEpisodeCreator")
+  episodeAppearances      EpisodeAppearance[]
+  episodeAppearancesProposed EpisodeAppearance[] @relation("AppearanceProposer")
+  targetedQuestionsSent   TargetedExpertQuestion[] @relation("TargetedQuestionAsker")
+  targetedQuestionsReceived TargetedExpertQuestion[] @relation("TargetedQuestionExpert")
+  inAppNotifications      InAppNotification[]
+
   @@map("user")
 }
 
@@ -226,6 +241,16 @@ model Profile {
 
   onboardingCompletedAt DateTime?
   onboardingSkippedAt   DateTime?
+
+  /// Speaker participation from invitation acceptance — not staff/host/employer access.
+  speakerParticipation Boolean @default(false)
+  /// Optional expert discussion areas (product UI; not professional qualification verification).
+  expertDiscussionAreas String[] @default([])
+  acceptTargetedQuestions Boolean @default(false)
+  consultationUrl       String?
+  consultationPaid      Boolean @default(false)
+  /// Member controls whether confirmed podcast appearances render on public profile.
+  showAppearancesOnProfile Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -502,6 +527,9 @@ enum ReportTargetType {
   MESSAGE_REQUEST
   MESSAGE
   PROFILE
+  COMMUNITY_QUESTION
+  COMMUNITY_ANSWER
+  EXPERT_FAQ
 }
 
 enum ReportStatus {
@@ -519,6 +547,9 @@ enum ModerationCaseStatus {
 enum ModerationHoldKind {
   MESSAGE_REQUEST
   MESSAGE
+  COMMUNITY_QUESTION
+  COMMUNITY_ANSWER
+  EXPERT_FAQ
 }
 
 enum ModerationHoldStatus {
@@ -750,4 +781,336 @@ model ModerationAccessLog {
 
   @@index([actorId, createdAt])
   @@map("moderation_access_log")
+}
+
+// ---------------------------------------------------------------------------
+// Milestone 3.2 — Community Q&A, speaker invitations, expert FAQs, episodes
+// ---------------------------------------------------------------------------
+
+enum CommunityContentStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  REJECTED
+  REMOVED_BY_OWNER
+  REMOVED_BY_MODERATOR
+}
+
+enum CommunityQuotaKind {
+  QUESTION
+  ANSWER
+}
+
+enum SpeakerInvitationPurpose {
+  SPEAKER_STATUS
+  EPISODE_ASSOCIATION
+}
+
+enum ExpertFaqStatus {
+  DRAFT
+  PENDING_EXPERT_APPROVAL
+  PENDING_MODERATION
+  PUBLISHED
+  REJECTED
+  REMOVED
+}
+
+enum PodcastEpisodePublicationState {
+  DRAFT
+  PUBLISHED
+  REMOVED
+}
+
+enum EpisodeAppearanceStatus {
+  PENDING_ADMIN
+  PENDING_MEMBER
+  CONFIRMED
+  REJECTED
+  REVOKED
+}
+
+enum EpisodeAppearanceRequester {
+  MEMBER
+  ADMIN
+}
+
+enum TargetedQuestionStatus {
+  OPEN
+  DECLINED
+  ANSWERED
+  HIDDEN
+}
+
+model CommunityQuestion {
+  id              String                 @id @default(cuid())
+  authorId        String
+  author          User                   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// Public author display name snapshot at publish time (profile may stay unpublished).
+  authorDisplayName String
+  title           String
+  body            String
+  topicTags       String[]               @default([])
+  episodeId       String?
+  episode         PodcastEpisode?        @relation(fields: [episodeId], references: [id], onDelete: SetNull)
+  status          CommunityContentStatus @default(DRAFT)
+  /// Revision currently visible publicly when status is PUBLISHED.
+  publishedRevision Int?
+  /// Latest submitted revision awaiting or under moderation.
+  currentRevision   Int                  @default(0)
+  moderationReason  String?
+  moderationPolicyVersion String?
+  moderationAdapter     String?
+  removedAt         DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  publishedAt       DateTime?
+
+  revisions CommunityQuestionRevision[]
+  answers   CommunityAnswer[]
+  targeted  TargetedExpertQuestion[]
+
+  @@index([status, publishedAt])
+  @@index([authorId, createdAt])
+  @@index([episodeId])
+  @@map("community_question")
+}
+
+model CommunityQuestionRevision {
+  id           String            @id @default(cuid())
+  questionId   String
+  question     CommunityQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  revision     Int
+  title        String
+  body         String
+  topicTags    String[]          @default([])
+  episodeId    String?
+  /// Exact classification for this revision.
+  classificationOutcome String?
+  classificationReason  String?
+  moderationDecision    String?
+  createdAt    DateTime          @default(now())
+
+  @@unique([questionId, revision])
+  @@map("community_question_revision")
+}
+
+model CommunityAnswer {
+  id                String                 @id @default(cuid())
+  questionId        String
+  question          CommunityQuestion      @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  authorId          String
+  author            User                   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorDisplayName String
+  body              String
+  status            CommunityContentStatus @default(DRAFT)
+  publishedRevision Int?
+  currentRevision   Int                    @default(0)
+  moderationReason  String?
+  moderationPolicyVersion String?
+  moderationAdapter     String?
+  removedAt         DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  publishedAt       DateTime?
+
+  revisions CommunityAnswerRevision[]
+
+  @@index([questionId, status, publishedAt])
+  @@index([authorId, createdAt])
+  @@map("community_answer")
+}
+
+model CommunityAnswerRevision {
+  id           String          @id @default(cuid())
+  answerId     String
+  answer       CommunityAnswer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  revision     Int
+  body         String
+  classificationOutcome String?
+  classificationReason  String?
+  moderationDecision    String?
+  createdAt    DateTime        @default(now())
+
+  @@unique([answerId, revision])
+  @@map("community_answer_revision")
+}
+
+model CommunityQuotaUse {
+  id             String             @id @default(cuid())
+  userId         String
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind           CommunityQuotaKind
+  /// UTC calendar day YYYY-MM-DD
+  dayKey         String
+  contentId      String
+  idempotencyKey String
+  createdAt      DateTime           @default(now())
+
+  @@unique([userId, kind, idempotencyKey])
+  @@index([userId, kind, dayKey])
+  @@map("community_quota_use")
+}
+
+/// Local mail-sink email verification (no real outbound mail in this milestone).
+model EmailVerificationToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// SHA-256 hex of the plaintext token — never store reusable plaintext.
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@map("email_verification_token")
+}
+
+model SpeakerInvitation {
+  id              String                    @id @default(cuid())
+  createdById     String
+  createdBy       User                      @relation("SpeakerInvitationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  /// Optional binding — acceptance requires verified account email match.
+  recipientEmail  String?
+  purpose         SpeakerInvitationPurpose
+  episodeId       String?
+  episode         PodcastEpisode?           @relation(fields: [episodeId], references: [id], onDelete: SetNull)
+  /// SHA-256 hex of invitation token.
+  tokenHash       String                    @unique
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  consumedAt      DateTime?
+  consumedById    String?
+  consumedBy      User?                     @relation("SpeakerInvitationConsumer", fields: [consumedById], references: [id], onDelete: SetNull)
+  note            String?
+  createdAt       DateTime                  @default(now())
+
+  @@index([createdById, createdAt])
+  @@index([recipientEmail])
+  @@map("speaker_invitation")
+}
+
+model ExpertFaq {
+  id                    String         @id @default(cuid())
+  expertUserId          String
+  expert                User           @relation("ExpertFaqOwner", fields: [expertUserId], references: [id], onDelete: Cascade)
+  /// Optional admin who proposed the draft (still requires expert approval of exact revision).
+  proposedByAdminId     String?
+  proposedByAdmin       User?          @relation("ExpertFaqProposer", fields: [proposedByAdminId], references: [id], onDelete: SetNull)
+  question              String
+  answer                String
+  currentRevision       Int            @default(1)
+  /// Exact revision the expert approved; null until expert approval.
+  expertApprovedRevision Int?
+  expertApprovedAt      DateTime?
+  status                ExpertFaqStatus @default(DRAFT)
+  moderationOutcome     String?
+  moderationReason      String?
+  moderationPolicyVersion String?
+  moderationAdapter     String?
+  publishedAt           DateTime?
+  removedAt             DateTime?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  revisions ExpertFaqRevision[]
+
+  @@index([expertUserId, status])
+  @@index([status, publishedAt])
+  @@map("expert_faq")
+}
+
+model ExpertFaqRevision {
+  id         String    @id @default(cuid())
+  faqId      String
+  faq        ExpertFaq @relation(fields: [faqId], references: [id], onDelete: Cascade)
+  revision   Int
+  question   String
+  answer     String
+  createdById String?
+  createdAt  DateTime  @default(now())
+
+  @@unique([faqId, revision])
+  @@map("expert_faq_revision")
+}
+
+model PodcastEpisode {
+  id               String                         @id @default(cuid())
+  series           String
+  title            String
+  description      String?
+  publicationDate  DateTime?
+  listeningUrl     String?
+  publicationState PodcastEpisodePublicationState @default(DRAFT)
+  createdById      String
+  createdBy        User                           @relation("PodcastEpisodeCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
+
+  appearances  EpisodeAppearance[]
+  invitations  SpeakerInvitation[]
+  questions    CommunityQuestion[]
+
+  @@index([publicationState, publicationDate])
+  @@index([series])
+  @@map("podcast_episode")
+}
+
+model EpisodeAppearance {
+  id              String                     @id @default(cuid())
+  episodeId       String
+  episode         PodcastEpisode             @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  memberUserId    String
+  member          User                       @relation(fields: [memberUserId], references: [id], onDelete: Cascade)
+  status          EpisodeAppearanceStatus
+  requestedBy     EpisodeAppearanceRequester
+  proposedById    String?
+  proposedBy      User?                      @relation("AppearanceProposer", fields: [proposedById], references: [id], onDelete: SetNull)
+  creditLabel     String?
+  /// Admin verification timestamp (member self-edit cannot set this).
+  adminVerifiedAt DateTime?
+  memberAcceptedAt DateTime?
+  rejectedAt      DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+
+  @@unique([episodeId, memberUserId])
+  @@index([memberUserId, status])
+  @@index([status, createdAt])
+  @@map("episode_appearance")
+}
+
+model TargetedExpertQuestion {
+  id           String                 @id @default(cuid())
+  askerId      String
+  asker        User                   @relation("TargetedQuestionAsker", fields: [askerId], references: [id], onDelete: Cascade)
+  expertUserId String
+  expert       User                   @relation("TargetedQuestionExpert", fields: [expertUserId], references: [id], onDelete: Cascade)
+  questionId   String?
+  question     CommunityQuestion?     @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  body         String
+  status       TargetedQuestionStatus @default(OPEN)
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  @@index([expertUserId, status, createdAt])
+  @@index([askerId, createdAt])
+  @@map("targeted_expert_question")
+}
+
+model InAppNotification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      String
+  title     String
+  body      String?
+  href      String?
+  payload   Json?
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt, createdAt])
+  @@map("in_app_notification")
 }
