@@ -16,6 +16,7 @@
     "db:generate": "prisma generate --config prisma7.config.ts",
     "bootstrap:admin": "tsx --env-file=.env.local scripts/bootstrap-admin.ts",
     "bootstrap:host": "tsx --env-file=.env.local scripts/bootstrap-host.ts",
+    "ai-policy": "tsx --env-file=.env.local scripts/ai-policy.ts",
     "seed:capability": "tsx --env-file=.env.local scripts/seed-capability.ts",
     "seed:hiring-pilot": "tsx --env-file=.env.local scripts/seed-hiring-pilot.ts",
     "worker": "tsx scripts/ai-worker.ts",

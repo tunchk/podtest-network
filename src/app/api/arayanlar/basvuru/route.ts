@@ -4,6 +4,7 @@ import {
   confirmCostAndStart,
   getOrCreateApplication,
   quoteArayanlarPrepare,
+  reconcileArayanlarPrepStatusFromJob,
   toGuestApplicationView,
 } from "@/lib/arayanlar/service";
 
@@ -14,10 +15,11 @@ export async function GET() {
   }
 
   const quote = await quoteArayanlarPrepare(session.user.id);
-  const app = await getOrCreateApplication(session.user.id);
+  await getOrCreateApplication(session.user.id);
+  const app = await reconcileArayanlarPrepStatusFromJob(session.user.id);
   return NextResponse.json({
     quote,
-    application: toGuestApplicationView(app),
+    application: app ? toGuestApplicationView(app) : null,
   });
 }
 

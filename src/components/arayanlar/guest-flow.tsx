@@ -4,6 +4,15 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import Link from "next/link";
 import type { DraftAnswers, SubmittedFacts } from "@/lib/arayanlar/constants";
 import { LegalCheckbox } from "@/components/legal/legal-checkbox";
+import { ArayanlarFlowStepper } from "@/components/arayanlar/flow-stepper";
+import {
+  isPrepWaiting,
+  mapArayanlarUserFacingState,
+  resolveFlowStep,
+  shouldPollPrep,
+  userFacingStateLabel,
+  type PrepJobMeta,
+} from "@/lib/arayanlar/presentation";
 
 type AppView = {
   id: string;
@@ -15,6 +24,7 @@ type AppView = {
   submittedFacts: SubmittedFacts | null;
   confirmedCostAt: string | null;
   withdrawnAt: string | null;
+  prepareJobId?: string | null;
 };
 
 type Quote = {
@@ -25,9 +35,8 @@ type Quote = {
   canAffordAfterGrant: boolean;
   note: string;
   currencyLabel: string;
+  unlimitedInternal?: boolean;
 };
-
-type Stage = "tanisalim" | "kontrol" | "hazirlik";
 
 const FACT_FIELDS = [
   ["targetRole", "Hedef rol"],
@@ -47,48 +56,7 @@ const SUMMARY_FIELDS = [
   ["contactChannel", "Onaylı iletişim"],
 ] as const;
 
-const prepStatusLabel: Record<string, string> = {
-  NOT_STARTED: "Başlamadı",
-  QUEUED: "Sırada",
-  RUNNING: "Hazırlanıyor",
-  READY: "Hazır",
-  FAILED: "Başarısız",
-  CANCELLED: "İptal",
-};
-
-function resolveStage(app: AppView): Stage {
-  if (app.status === "SUBMITTED") return "hazirlik";
-  if (app.status === "AWAITING_CONFIRMATION") return "kontrol";
-  return "tanisalim";
-}
-
-function StageTabs({ stage }: { stage: Stage }) {
-  const items: Array<{ id: Stage; label: string }> = [
-    { id: "tanisalim", label: "Tanışalım" },
-    { id: "kontrol", label: "Bilgilerini kontrol et" },
-    { id: "hazirlik", label: "Hazırlığın" },
-  ];
-  return (
-    <nav aria-label="Başvuru aşamaları" className="flex flex-wrap gap-2 text-sm">
-      {items.map((item) => {
-        const active = item.id === stage;
-        return (
-          <span
-            key={item.id}
-            aria-current={active ? "step" : undefined}
-            className={
-              active
-                ? "rounded-md bg-[var(--accent)] px-3 py-1.5 font-medium text-white"
-                : "rounded-md border border-[var(--line)] px-3 py-1.5 text-[var(--muted)]"
-            }
-          >
-            {item.label}
-          </span>
-        );
-      })}
-    </nav>
-  );
-}
+const POLL_MS = 4000;
 
 function ConversationBubbles({
   turns,
@@ -125,7 +93,9 @@ function ConversationBubbles({
                     : "max-w-[85%] rounded-2xl rounded-bl-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm text-[var(--ink)]"
                 }
               >
-                <p className={`mb-1 text-xs font-semibold ${isGuest ? "text-white/80" : "text-[var(--muted)]"}`}>
+                <p
+                  className={`mb-1 text-xs font-semibold ${isGuest ? "text-white/80" : "text-[var(--muted)]"}`}
+                >
                   {label}
                   {turn.skipped ? " · atlandı" : ""}
                 </p>
@@ -140,11 +110,46 @@ function ConversationBubbles({
   );
 }
 
+function PrepWaitingPanel({ onCheckNow, checking }: { onCheckNow: () => void; checking: boolean }) {
+  return (
+    <div className="space-y-4" aria-live="polite">
+      <div>
+        <h2 className="font-[family-name:var(--font-display)] text-xl">Hazırlığını oluşturuyoruz</h2>
+        <p className="mt-2 text-sm text-[var(--muted)]">
+          CV’ni ve onayladığın bilgileri kullanarak kayıt öncesi hazırlığını çıkarıyoruz.
+        </p>
+      </div>
+      <p className="rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-3 text-sm">
+        Bu sayfada beklemek zorunda değilsin. Hazırlık arka planda devam eder. Sayfayı kapatabilir
+        veya başka bir yere geçebilirsin. Kayıt öncesi notların hazır olduğunda Bildirimler’de haber
+        vereceğiz.
+      </p>
+      <ol className="space-y-2 text-sm">
+        <li>✓ Bilgilerin alındı</li>
+        <li>
+          <span className="text-[var(--accent)]">●</span> Hazırlık oluşturuluyor
+        </li>
+        <li className="text-[var(--muted)]">○ Kayıt rehberi hazır</li>
+      </ol>
+      <button
+        type="button"
+        className="btn btn-ghost"
+        disabled={checking}
+        onClick={onCheckNow}
+        aria-label="Şimdi kontrol et"
+      >
+        {checking ? "Kontrol ediliyor…" : "Şimdi kontrol et"}
+      </button>
+    </div>
+  );
+}
+
 export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: boolean }) {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [app, setApp] = useState<AppView | null>(null);
   const [facts, setFacts] = useState<SubmittedFacts | null>(null);
   const [guestBrief, setGuestBrief] = useState<Record<string, unknown> | null>(null);
+  const [prepJob, setPrepJob] = useState<PrepJobMeta>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -152,6 +157,7 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
   const [summaryMode, setSummaryMode] = useState(false);
   const [summary, setSummary] = useState<DraftAnswers>({});
   const [loadFailed, setLoadFailed] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [cvDocs, setCvDocs] = useState<
     Array<{ id: string; originalFilename: string; extractionStatus: string }>
   >([]);
@@ -161,6 +167,7 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const autoCvStarted = useRef(false);
+  const pollBusy = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -173,6 +180,7 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
       setApp(basvuru.application ?? gonder.application);
       setFacts(gonder.factsPreview);
       setGuestBrief(gonder.guestBrief?.brief ?? null);
+      setPrepJob(gonder.prepJob ?? null);
       if (gonder.application?.draftAnswers) {
         setSummary(gonder.application.draftAnswers);
       }
@@ -194,6 +202,27 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [app?.conversationTurns?.length, summaryMode]);
+
+  // Safe read-only polling while preparation is in progress.
+  useEffect(() => {
+    if (!app) return;
+    const state = mapArayanlarUserFacingState({
+      status: app.status,
+      prepStatus: app.prepStatus,
+      prepJob,
+    });
+    if (!shouldPollPrep(state)) return;
+
+    const id = window.setInterval(() => {
+      if (pollBusy.current || document.visibilityState === "hidden") return;
+      pollBusy.current = true;
+      void refresh().finally(() => {
+        pollBusy.current = false;
+      });
+    }, POLL_MS);
+
+    return () => window.clearInterval(id);
+  }, [app, prepJob, refresh]);
 
   async function confirmCost() {
     if (busy) return;
@@ -299,7 +328,6 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
     }
   }
 
-  // Explicit landing entry: /arayanlar?kaynak=cv → fill proposals from newest ready CV.
   useEffect(() => {
     if (!cvEntryArmed || autoCvStarted.current || busy || !selectedCvId) return;
     if (app && (app.status === "SUBMITTED" || app.status === "WITHDRAWN")) return;
@@ -344,7 +372,7 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
       if (!res.ok) {
         setError(
           data.error === "INSUFFICIENT_CREDITS"
-            ? "Yetersiz kredi. Rezervasyon yapılamadı; özetin korundu."
+            ? "Yetersiz kredi. Özetin korundu; hazırlık başlatılmadı."
             : data.error === "LEGAL_HOST_PREP_REQUIRED"
               ? "Sunucu hazırlık paylaşımı onayı gerekli."
               : (data.error ?? "Gönderilemedi"),
@@ -352,6 +380,33 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
         return;
       }
       setApp(data.application);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryPrep() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/arayanlar/gonder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "retry_prep" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(
+          data.error === "NOT_RETRYABLE" || data.error === "Max attempts"
+            ? "Bu hazırlık için yeniden deneme artık mümkün değil."
+            : (data.error ?? "Yeniden denenemedi"),
+        );
+        return;
+      }
+      if (data.application) setApp(data.application);
+      if (data.prepJob) setPrepJob(data.prepJob);
       await refresh();
     } finally {
       setBusy(false);
@@ -374,6 +429,29 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
         return;
       }
       if (data.application) setApp(data.application);
+      setWithdrawOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function returnToFacts() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/arayanlar/gonder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "revise" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Bilgilere dönülemedi");
+        return;
+      }
+      if (data.application) setApp(data.application);
+      await refresh();
     } finally {
       setBusy(false);
     }
@@ -384,7 +462,7 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
       <div className="panel space-y-3">
         <p className="text-sm text-red-700">Başvuru yüklenemedi.</p>
         <button type="button" className="btn btn-primary" onClick={() => void refresh()}>
-          Yeniden dene
+          Şimdi kontrol et
         </button>
       </div>
     );
@@ -394,26 +472,55 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
     return <p className="text-sm text-[var(--muted)]">Yükleniyor…</p>;
   }
 
+  const facing = mapArayanlarUserFacingState({
+    status: app.status,
+    prepStatus: app.prepStatus,
+    prepJob,
+  });
+  const flowStep = resolveFlowStep({
+    status: app.status,
+    prepStatus: app.prepStatus,
+    confirmedCostAt: app.confirmedCostAt,
+  });
+  const turns = app.conversationTurns ?? [];
+  const showKontrol = app.status === "AWAITING_CONFIRMATION";
+  const showHazirlik = app.status === "SUBMITTED";
+
   if (app.status === "WITHDRAWN") {
     return (
-      <div className="panel space-y-4">
-        <p>Başvurun geri çekildi. Daha önce indirilmiş materyaller teknik olarak geri alınamaz.</p>
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void confirmCost()}>
-          Yeniden başla
-        </button>
-        {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      <div className="space-y-6">
+        <ArayanlarFlowStepper current="tanisalim" />
+        <section className="panel space-y-4">
+          <h2 className="font-[family-name:var(--font-display)] text-xl">
+            {userFacingStateLabel("WITHDRAWN")}
+          </h2>
+          <p className="text-sm text-[var(--muted)]">
+            Başvurun aktif süreçten çıkarıldı. Devam eden hazırlık varsa durduruldu; atanan host
+            erişimi kaldırıldı. Daha önce indirilmiş kopyalar teknik olarak geri alınamayabilir.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy}
+            onClick={() => void confirmCost()}
+          >
+            {busy ? "Başlatılıyor…" : "Yeniden başla"}
+          </button>
+          {error ? (
+            <p role="alert" className="text-sm text-red-700">
+              {error}
+            </p>
+          ) : null}
+        </section>
       </div>
     );
   }
 
-  const stage = resolveStage(app);
-  const turns = app.conversationTurns ?? [];
-
   return (
     <div className="space-y-6">
-      <StageTabs stage={stage} />
+      <ArayanlarFlowStepper current={flowStep} />
 
-      {stage === "tanisalim" ? (
+      {app.status === "DRAFT" ? (
         <section className="panel space-y-4" aria-labelledby="stage-tanisalim">
           <h2 id="stage-tanisalim" className="font-[family-name:var(--font-display)] text-xl">
             Tanışalım
@@ -423,9 +530,9 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
             <>
               <p className="text-sm text-[var(--muted)]">
                 Kısa bir hazırlık sohbeti veya düzenlenebilir özet ile devam edebilirsin. Kredi
-                rezervasyonu yalnızca bilgilerini onayladığında başlar. CV zorunlu değildir.
+                yalnızca bilgilerini onaylayıp hazırlığı başlattığında kullanılır. CV zorunlu
+                değildir.
               </p>
-              <p className="text-sm text-[var(--muted)]">{quote.note}</p>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -433,7 +540,7 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
                   disabled={busy}
                   onClick={() => void confirmCost()}
                 >
-                  {busy ? "Başlatılıyor…" : "Tanışmaya başla"}
+                  {busy ? "Başlatılıyor…" : "Başvuruyu başlat"}
                 </button>
                 {cvDocs.length ? (
                   <button
@@ -448,10 +555,6 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
               </div>
               {cvDocs.length ? (
                 <div className="space-y-2 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-3 text-sm">
-                  <p className="text-[var(--muted)]">
-                    Mevcut özel CV'nden düzenlenebilir öneriler üretilir. Profil önerilerini
-                    uygulamış olman gerekmez.
-                  </p>
                   <label className="block">
                     <span className="text-[var(--muted)]">CV</span>
                     <select
@@ -473,11 +576,10 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
             </>
           ) : (
             <>
+              <p className="text-sm text-[var(--muted)]">
+                İsteğe bağlı sorular atlanabilir. Sohbet zorunlu değil; özet yolu da yeterli.
+              </p>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm text-[var(--muted)]">
-                  İsteğe bağlı sorular atlanabilir. Sohbet zorunlu değil; özet yolu da yeterli. CV
-                  zorunlu değildir.
-                </p>
                 <button
                   type="button"
                   className="text-sm text-[var(--accent)] underline"
@@ -490,10 +592,10 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
 
               {cvDocs.length ? (
                 <div className="space-y-2 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-3 text-sm">
-                  <p className="font-medium">CV'mden bölüm hazırlığına başla</p>
+                  <p className="font-medium">CV’mden bölüm hazırlığına başla</p>
                   <p className="text-[var(--muted)]">
-                    Özel CV'ni seç; düzenlenebilir öneriler üretilir. Profil önerilerini uygulamış
-                    olman gerekmez. Onaylamadan hiçbir şey paylaşılmaz ve ekstra AI kredisi alınmaz.
+                    Düzenlenebilir öneriler üretilir. Onaylamadan hiçbir şey paylaşılmaz; ekstra AI
+                    kredisi alınmaz.
                   </p>
                   <label className="block">
                     <span className="text-[var(--muted)]">CV</span>
@@ -525,56 +627,46 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
               {!summaryMode ? (
                 <>
                   <ConversationBubbles turns={turns} endRef={chatEndRef} />
-                  {app.status === "DRAFT" ? (
-                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                      <input
-                        ref={inputRef}
-                        className="min-w-0 flex-1 rounded-md border border-[var(--line)] bg-transparent px-3 py-2 text-sm"
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            void send(false);
-                          }
-                        }}
-                        placeholder="Kısa cevap…"
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                    <input
+                      ref={inputRef}
+                      className="min-w-0 flex-1 rounded-md border border-[var(--line)] bg-transparent px-3 py-2 text-sm"
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          void send(false);
+                        }
+                      }}
+                      placeholder="Kısa cevap…"
+                      disabled={busy}
+                      aria-label="Yanıtın"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={busy || !message.trim()}
+                        onClick={() => void send(false)}
+                      >
+                        {busy ? "Gönderiliyor…" : "Yanıtı gönder"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
                         disabled={busy}
-                        aria-label="Yanıtın"
-                      />
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          disabled={busy || !message.trim()}
-                          onClick={() => void send(false)}
-                        >
-                          {busy ? "Gönderiliyor…" : "Yanıtı gönder"}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          disabled={busy}
-                          onClick={() => void send(true)}
-                        >
-                          Atla
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          disabled={busy}
-                          onClick={() => setSummaryMode(true)}
-                        >
-                          Özeti kontrol et
-                        </button>
-                      </div>
+                        onClick={() => void send(true)}
+                      >
+                        Atla
+                      </button>
                     </div>
-                  ) : null}
+                  </div>
                 </>
               ) : (
                 <div className="space-y-2 text-sm">
                   <p className="text-[var(--muted)]">
-                    Alanları düzenleyip özeti kaydet; sohbet gerekmez. Onay adımına geçersin.
+                    Alanları düzenleyip kaydet; sohbet gerekmez. Sonraki adımda onaylarsın.
                   </p>
                   {SUMMARY_FIELDS.map(([key, label]) => (
                     <label key={key} className="block">
@@ -593,7 +685,7 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
                     disabled={busy}
                     onClick={() => void useSummary()}
                   >
-                    {busy ? "Kaydediliyor…" : "Özeti kontrol et"}
+                    {busy ? "Kaydediliyor…" : "Bilgilerimi kontrol et"}
                   </button>
                 </div>
               )}
@@ -602,14 +694,14 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
         </section>
       ) : null}
 
-      {stage === "kontrol" ? (
+      {showKontrol ? (
         <section className="panel space-y-4" aria-labelledby="stage-kontrol">
           <h2 id="stage-kontrol" className="font-[family-name:var(--font-display)] text-xl">
             Bilgilerini kontrol et
           </h2>
           <p className="text-sm text-[var(--muted)]">
-            Sunucular yalnızca burada onayladığın alanları görür. Ham CV, özel AI sohbeti ve ilgisiz
-            profil alanları varsayılan olarak paylaşılmaz. Onaydan önce düzenleyebilirsin.
+            Atanan host yalnızca burada onayladığın alanları görür. Ham CV ve sohbet varsayılan
+            olarak paylaşılmaz.
           </p>
 
           {facts ? (
@@ -630,29 +722,36 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
             <p className="text-sm text-[var(--muted)]">Özet yükleniyor…</p>
           )}
 
-          <div className="rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-3 text-sm">
-            <p className="font-medium">Kredi rezervasyonu (onayda başlar)</p>
-            <p className="mt-1 text-[var(--muted)]">{quote.note}</p>
-            <p className="mt-2">
-              Maliyet: <strong>{quote.cost}</strong> {quote.currencyLabel ?? "AI kredisi"} ·
-              Sponsorluk: {quote.sponsoredAmount} · Mevcut bakiye: {quote.available}
-            </p>
-            {!quote.canAffordAfterGrant ? (
-              <p className="mt-2 text-sm text-red-700">
-                Sponsorluk sonrası bakiye yetersiz görünebilir. Onay başarısız olursa özetin korunur.
-              </p>
-            ) : null}
-          </div>
+          {!quote.unlimitedInternal ? (
+            <div className="rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-3 text-sm">
+              <p className="font-medium">Hazırlık maliyeti</p>
+              {quote.grantAlreadyIssued || quote.sponsoredAmount > 0 ? (
+                <p className="mt-1 text-[var(--muted)]">
+                  Bu hazırlık sponsorlu olarak oluşturulabilir ({quote.cost}{" "}
+                  {quote.currencyLabel}).
+                </p>
+              ) : (
+                <p className="mt-1 text-[var(--muted)]">
+                  Bu hazırlık için {quote.cost} {quote.currencyLabel} kullanılır.
+                </p>
+              )}
+              {!quote.canAffordAfterGrant ? (
+                <p className="mt-2 text-sm text-red-700">
+                  Bakiye yetersiz görünüyor. Onay başarısız olursa özetin korunur.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           <fieldset className="space-y-2 rounded-md border border-[var(--line)] p-3 text-sm">
             <legend className="px-1 font-medium">Sunucu paylaşımı</legend>
             <p className="text-[var(--muted)]">
-              Atanan sunucu ham CV dosyanı görmez; yalnızca onayladığın gerçekler ve türetilmiş
-              hazırlık paketini görür.
+              Atanan host ham CV dosyanı görmez; yalnızca onayladığın gerçekler ve türetilmiş
+              hazırlık notlarını görür.
             </p>
             <LegalCheckbox
               id="host-prep-share"
-              label="Atanan sunucuya türetilmiş hazırlık paketinin gösterilebileceğini anlıyorum."
+              label="Atanan sunucuya türetilmiş hazırlık notlarının gösterilebileceğini anlıyorum."
               href="/yasal/host_prep_sharing_notice"
               checked={hostPrepShareOk}
               onChange={setHostPrepShareOk}
@@ -663,58 +762,166 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
           <button
             type="button"
             className="btn btn-primary"
-            disabled={busy || !facts || !hostPrepShareOk}
+            disabled={busy || !facts || !hostPrepShareOk || !quote.canAffordAfterGrant}
             onClick={() => void submit()}
+            title={
+              !hostPrepShareOk
+                ? "Önce sunucu paylaşım bilgilendirmesini onayla"
+                : !quote.canAffordAfterGrant
+                  ? "Yetersiz kredi"
+                  : undefined
+            }
           >
-            {busy ? "Gönderiliyor…" : "Bilgilerimi onayla ve hazırlığı başlat"}
+            {busy ? "Başlatılıyor…" : "Bilgilerimi onayla ve hazırlığı başlat"}
           </button>
           <p className="text-xs text-[var(--muted)]">
-            Gönderim davet veya kesin kayıt tarihi değildir. Bu adım krediyi rezerve eder; her iki
-            hazırlık çıktısı hazır olunca düşülür. Onaydan önce yukarıdaki alanları düzenleyebilirsin.
+            Bu adım davet veya kesin kayıt tarihi değildir. Onaydan önce alanları düzenleyebilirsin.
           </p>
         </section>
       ) : null}
 
-      {stage === "hazirlik" ? (
+      {showHazirlik ? (
         <section className="panel space-y-4" aria-labelledby="stage-hazirlik">
-          <h2 id="stage-hazirlik" className="font-[family-name:var(--font-display)] text-xl">
-            Hazırlığın
-          </h2>
-          <p className="text-sm">
-            Durum:{" "}
-            <strong>{prepStatusLabel[app.prepStatus] ?? app.prepStatus}</strong>
-          </p>
+          {isPrepWaiting(facing) ? (
+            <PrepWaitingPanel
+              checking={busy}
+              onCheckNow={() => {
+                setBusy(true);
+                void refresh().finally(() => setBusy(false));
+              }}
+            />
+          ) : null}
 
-          {app.prepStatus === "READY" && guestBrief ? (
-            <div className="space-y-3 text-sm">
-              <p className="font-medium">Konuk brifin hazır</p>
-              <p className="text-[var(--muted)]">{String(guestBrief.recordingWhatToExpect ?? "")}</p>
-              <Link href="/arayanlar/hazirligim" className="btn btn-primary inline-flex">
-                Hazırlığımı gör
-              </Link>
-            </div>
-          ) : app.prepStatus === "FAILED" ? (
-            <div className="space-y-2 text-sm">
-              <p className="text-red-700">
-                Hazırlık tamamlanamadı. Kısmi çıktı başarı sayılmaz. Yeniden denemek için başvuruyu
-                gözden geçirebilir veya geri çekebilirsin.
+          {facing === "READY" ? (
+            <div className="space-y-3" aria-live="polite">
+              <h2 id="stage-hazirlik" className="font-[family-name:var(--font-display)] text-xl">
+                Kayıt öncesi notların hazır
+              </h2>
+              <p className="text-sm text-[var(--muted)]">
+                CV’nden ve onayladığın bilgilerden kayıt öncesi notların oluşturuldu.
               </p>
-              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void refresh()}>
-                Durumu yenile
-              </button>
+              {!quote.unlimitedInternal ? (
+                <p className="text-sm text-[var(--muted)]">
+                  {quote.sponsoredAmount > 0
+                    ? "Bu hazırlık sponsorlu olarak oluşturuldu."
+                    : "Bu hazırlık için 1 AI kredisi kullanıldı."}
+                </p>
+              ) : null}
+              <p className="text-sm text-[var(--muted)]">
+                Atanan host da kayıt için gerekli hazırlık notlarını görebilecek.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Link href="/arayanlar/hazirligim" className="btn btn-primary inline-flex">
+                  Notlarımı aç
+                </Link>
+                <Link href="/arayanlar/basvurum" className="btn btn-ghost inline-flex">
+                  Başvuruma dön
+                </Link>
+              </div>
             </div>
+          ) : null}
+
+          {facing === "FAILED_RETRYABLE" ? (
+            <div className="space-y-3" aria-live="polite">
+              <h2 className="font-[family-name:var(--font-display)] text-xl">
+                Hazırlık tamamlanamadı
+              </h2>
+              <p className="text-sm text-[var(--muted)]">
+                Bilgilerin ve başvurun güvende. Teknik bir sorun nedeniyle hazırlığı tamamlayamadık.
+              </p>
+              <p className="text-sm text-[var(--muted)]">
+                Teknik yeniden deneme ek kredi kullanmaz.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => void retryPrep()}
+                >
+                  {busy ? "Yeniden deneniyor…" : "Ücretsiz yeniden dene"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={busy}
+                  onClick={() => void returnToFacts()}
+                >
+                  Bilgilerime dön
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {facing === "FAILED_TERMINAL" ? (
+            <div className="space-y-3" aria-live="polite">
+              <h2 className="font-[family-name:var(--font-display)] text-xl">
+                Hazırlığı şu anda tamamlayamadık
+              </h2>
+              <p className="text-sm text-[var(--muted)]">
+                Bilgilerin güvende. Bu deneme için yeniden deneme hakkı kalmadı. Bilgilerine dönüp
+                yeniden gönderebilir veya başvurunu geri çekebilirsin.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => void returnToFacts()}
+                >
+                  Bilgilerime dön
+                </button>
+                <Link href="/arayanlar/basvurum" className="btn btn-ghost inline-flex">
+                  Başvuruma dön
+                </Link>
+              </div>
+            </div>
+          ) : null}
+
+          {!withdrawOpen ? (
+            <button
+              type="button"
+              className="btn btn-ghost text-[var(--danger)]"
+              disabled={busy}
+              onClick={() => setWithdrawOpen(true)}
+            >
+              Başvuruyu geri çek
+            </button>
           ) : (
-            <div className="space-y-2 text-sm text-[var(--muted)]">
-              <p>İki ayrı paket üretiliyor. Kısmi hata olursa hazırlık tamamlanmış sayılmaz.</p>
-              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void refresh()}>
-                {busy ? "Yenileniyor…" : "Durumu yenile"}
-              </button>
+            <div
+              role="dialog"
+              aria-labelledby="withdraw-title"
+              className="space-y-3 rounded-md border border-[var(--danger)]/40 bg-[var(--surface)] p-4"
+            >
+              <h3 id="withdraw-title" className="font-medium">
+                Başvurunu geri çekmek istiyor musun?
+              </h3>
+              <p className="text-sm text-[var(--muted)]">
+                Başvurun aktif süreçten çıkarılır. Devam eden hazırlık varsa durdurulur ve host ile
+                paylaşılmaz. Girdiğin taslak bilgiler yeniden başladığında kullanılabilir; daha
+                önce oluşturulmuş hazırlık host erişiminden kaldırılır. Rezerve edilmiş kredi varsa
+                mevcut kurallara göre serbest bırakılır — ek iade vaadi yoktur.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary bg-[var(--danger)]"
+                  disabled={busy}
+                  onClick={() => void withdraw()}
+                >
+                  {busy ? "Geri çekiliyor…" : "Başvuruyu geri çek"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={busy}
+                  onClick={() => setWithdrawOpen(false)}
+                >
+                  Vazgeç
+                </button>
+              </div>
             </div>
           )}
-
-          <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void withdraw()}>
-            Başvuruyu geri çek
-          </button>
         </section>
       ) : null}
 

@@ -103,7 +103,7 @@ describe("in-app notifications", () => {
     const first = await createNotification({
       userId: owner,
       kind: "arayanlar_prep_ready",
-      title: "Arayanlar hazırlığın hazır",
+      title: "Kayıt öncesi notların hazır",
       href: "/arayanlar/hazirligim",
       dedupeKey: key,
     });
@@ -112,7 +112,7 @@ describe("in-app notifications", () => {
     const second = await createNotification({
       userId: owner,
       kind: "arayanlar_prep_ready",
-      title: "Arayanlar hazırlığın hazır",
+      title: "Kayıt öncesi notların hazır",
       href: "/arayanlar/hazirligim",
       dedupeKey: key,
     });

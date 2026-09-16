@@ -15,6 +15,12 @@ enum StaffRole {
   ADMIN
 }
 
+/// Account-level AI credit entitlement (independent of staffRole).
+enum AiUsagePolicy {
+  STANDARD
+  UNLIMITED_INTERNAL
+}
+
 enum PublicationStatus {
   DRAFT
   PENDING_REVIEW
@@ -110,6 +116,8 @@ model User {
   emailVerified Boolean   @default(false)
   image         String?
   staffRole     StaffRole @default(MEMBER)
+  /// AI credit entitlement — set only via ops CLI; never self-serve.
+  aiUsagePolicy AiUsagePolicy @default(STANDARD)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

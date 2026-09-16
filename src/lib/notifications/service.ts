@@ -283,10 +283,27 @@ export async function resolveNotificationDestination(
       if (!app || app.status === "WITHDRAWN" || app.prepStatus !== "READY") {
         return {
           available: false,
-          reason: "Misafir hazırlığın şu an görüntülenemiyor.",
+          reason: "Kayıt öncesi notların şu an görüntülenemiyor.",
         };
       }
       return { available: true, href: fallbackHref ?? "/arayanlar/hazirligim" };
+    }
+    case "arayanlar_application_submitted":
+    case "arayanlar_prep_failed_retryable": {
+      const app = await prisma.arayanlarApplication.findUnique({
+        where: { userId: viewerUserId },
+        select: { status: true },
+      });
+      if (!app || app.status === "WITHDRAWN") {
+        return {
+          available: false,
+          reason: "Bu başvuru bildirimi artık geçerli değil.",
+        };
+      }
+      return { available: true, href: fallbackHref ?? "/arayanlar/basvurum" };
+    }
+    case "arayanlar_application_withdrawn": {
+      return { available: true, href: fallbackHref ?? "/arayanlar" };
     }
     case "job_listing_published":
     case "job_listing_rejected":

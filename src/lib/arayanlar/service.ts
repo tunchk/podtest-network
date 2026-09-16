@@ -33,6 +33,7 @@ import {
   releaseJobReservation,
   reserveCreditsForJob,
 } from "@/lib/credits/ledger";
+import { isUnlimitedAiUsage } from "@/lib/ai/usage-policy";
 
 function asDraftAnswers(value: unknown): DraftAnswers {
   if (!value || typeof value !== "object") return {};
@@ -45,6 +46,21 @@ function asTurns(value: unknown): ConversationTurn[] {
 }
 
 export async function quoteArayanlarPrepare(userId: string) {
+  const unlimited = await isUnlimitedAiUsage(userId);
+  if (unlimited) {
+    const available = await getAvailableCreditBalanceForArayanlar(userId);
+    return {
+      cost: ARAYANLAR_PREPARE_CREDIT_COST,
+      sponsoredAmount: Number(process.env.SPONSORED_ARAYANLAR_PREPARE_AMOUNT ?? "1"),
+      grantAlreadyIssued: true,
+      available,
+      canAffordAfterGrant: true,
+      currencyLabel: "AI kredisi",
+      unlimitedInternal: true as const,
+      note:
+        "Kısa sohbet veya özet ile ilerlersin; kredi yalnızca hazırlığı başlattığında kullanılır.",
+    };
+  }
   // Do not auto-grant until cost is confirmed — show planned sponsorship amount.
   const available = await getAvailableCreditBalanceForArayanlar(userId);
   const grant = await prisma.creditLot.findUnique({
@@ -59,8 +75,9 @@ export async function quoteArayanlarPrepare(userId: string) {
       available + (grant ? 0 : Number(process.env.SPONSORED_ARAYANLAR_PREPARE_AMOUNT ?? "1")) >=
       ARAYANLAR_PREPARE_CREDIT_COST,
     currencyLabel: "AI kredisi",
+    unlimitedInternal: false as const,
     note:
-      "Kısa sohbet ve iki hazırlık çıktısı tek seferlik sponsorlu akıştır; mesaj başına ücret yok.",
+      "Kısa sohbet veya özet ile ilerlersin; kredi yalnızca hazırlığı başlattığında kullanılır.",
   };
 }
 
@@ -97,7 +114,9 @@ export async function confirmCostAndStart(userId: string) {
     return app;
   }
 
-  await ensureSponsoredArayanlarPrepareGrant(userId);
+  if (!(await isUnlimitedAiUsage(userId))) {
+    await ensureSponsoredArayanlarPrepareGrant(userId);
+  }
 
   return prisma.arayanlarApplication.update({
     where: { id: app.id },
@@ -344,14 +363,19 @@ export async function submitApplication(options: {
   const { requireHostPrepSharingGate } = await import("@/lib/legal/service");
   await requireHostPrepSharingGate(options.userId, app.id);
 
-  if (!app.confirmedCostAt) {
-    await ensureSponsoredArayanlarPrepareGrant(options.userId);
-  } else {
-    await ensureSponsoredArayanlarPrepareGrant(options.userId);
+  const unlimited = await isUnlimitedAiUsage(options.userId);
+
+  if (!unlimited) {
+    if (!app.confirmedCostAt) {
+      await ensureSponsoredArayanlarPrepareGrant(options.userId);
+    } else {
+      await ensureSponsoredArayanlarPrepareGrant(options.userId);
+    }
   }
 
   const nextRevision = app.submittedRevision + 1;
   const jobId = randomUUID().replace(/-/g, "").slice(0, 24);
+  const creditCost = unlimited ? 0 : ARAYANLAR_PREPARE_CREDIT_COST;
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -377,26 +401,35 @@ export async function submitApplication(options: {
           profileId: null,
           kind: "ARAYANLAR_PREPARE",
           status: "QUEUED",
-          creditCostSnapshot: ARAYANLAR_PREPARE_CREDIT_COST,
+          creditCostSnapshot: creditCost,
           profileDraftRevision: nextRevision,
           arayanlarApplicationId: app.id,
           maxAttempts: 3,
         },
       });
 
-      const reservation = await reserveCreditsForJob({
-        userId: options.userId,
-        jobId: job.id,
-        amount: ARAYANLAR_PREPARE_CREDIT_COST,
-        tx,
-      });
+      if (!unlimited) {
+        const reservation = await reserveCreditsForJob({
+          userId: options.userId,
+          jobId: job.id,
+          amount: ARAYANLAR_PREPARE_CREDIT_COST,
+          tx,
+        });
 
-      await tx.aiJob.update({
-        where: { id: job.id },
-        data: { reservationEntryId: reservation.id },
-      });
+        await tx.aiJob.update({
+          where: { id: job.id },
+          data: { reservationEntryId: reservation.id },
+        });
+      }
 
       return { application: updated, jobId: job.id };
+    });
+
+    const { notifyArayanlarApplicationSubmitted } = await import("@/lib/arayanlar/notifications");
+    await notifyArayanlarApplicationSubmitted({
+      userId: options.userId,
+      applicationId: result.application.id,
+      revision: result.application.submittedRevision,
     });
 
     return result;
@@ -450,7 +483,7 @@ export async function startRevisionDraft(userId: string) {
         {
           role: "assistant",
           content:
-            "Önceki gönderimin duruyor; bu yeni bir taslak. Değişiklikler yeni bir gönderim ve yeni hazırlık paketi gerektirir.",
+            "Önceki gönderimin duruyor; bu yeni bir taslak. Değişiklikler yeni bir gönderim ve yeni hazırlık gerektirir.",
           at: new Date().toISOString(),
         },
         buildOpeningTurn(answers),
@@ -479,7 +512,7 @@ export async function withdrawApplication(userId: string) {
     await releaseJobReservation(app.prepareJobId);
   }
 
-  return prisma.arayanlarApplication.update({
+  const updated = await prisma.arayanlarApplication.update({
     where: { id: app.id },
     data: {
       status: "WITHDRAWN",
@@ -489,6 +522,35 @@ export async function withdrawApplication(userId: string) {
       assignedAt: null,
       assignedByUserId: null,
     },
+  });
+
+  const { notifyArayanlarApplicationWithdrawn } = await import("@/lib/arayanlar/notifications");
+  await notifyArayanlarApplicationWithdrawn({
+    userId,
+    applicationId: updated.id,
+    revision: updated.submittedRevision,
+  });
+
+  return updated;
+}
+
+/**
+ * Safe technical retry of the existing preparation job.
+ * Does not create a new job or reserve additional credits.
+ */
+export async function retryArayanlarPreparation(userId: string) {
+  const app = await prisma.arayanlarApplication.findUnique({ where: { userId } });
+  if (!app) throw new Error("NOT_FOUND");
+  if (app.status !== "SUBMITTED") throw new Error("INVALID_STATE");
+  if (app.prepStatus !== "FAILED") throw new Error("NOT_RETRYABLE");
+  if (!app.prepareJobId) throw new Error("NO_JOB");
+
+  const { requestJobRetry } = await import("@/lib/ai/jobs");
+  await requestJobRetry(app.prepareJobId, userId);
+
+  return prisma.arayanlarApplication.update({
+    where: { id: app.id },
+    data: { prepStatus: "QUEUED" },
   });
 }
 
@@ -555,7 +617,53 @@ export function toGuestApplicationView(app: {
   };
 }
 
+/**
+ * Heal cases where the AI job finished READY but prepStatus was left stale
+ * (historically: UNLIMITED_INTERNAL jobs misclassified as host regen).
+ * Safe/idempotent: only advances QUEUED/RUNNING → READY when artifacts exist.
+ */
+export async function reconcileArayanlarPrepStatusFromJob(userId: string) {
+  const app = await prisma.arayanlarApplication.findUnique({ where: { userId } });
+  if (!app || app.status !== "SUBMITTED") return app;
+  if (app.prepStatus === "READY" || app.prepStatus === "FAILED" || app.prepStatus === "CANCELLED") {
+    return app;
+  }
+  if (!app.prepareJobId || app.submittedRevision < 1) return app;
+
+  const job = await prisma.aiJob.findUnique({ where: { id: app.prepareJobId } });
+  if (!job || job.status !== "READY") return app;
+  if (job.providerMode === "platform_host_regen") return app;
+  if (job.arayanlarApplicationId !== app.id) return app;
+
+  const guestBrief = await prisma.arayanlarArtifact.findUnique({
+    where: {
+      applicationId_kind_submittedRevision: {
+        applicationId: app.id,
+        kind: "GUEST_BRIEF",
+        submittedRevision: app.submittedRevision,
+      },
+    },
+    select: { id: true },
+  });
+  if (!guestBrief) return app;
+
+  const updated = await prisma.arayanlarApplication.update({
+    where: { id: app.id },
+    data: { prepStatus: "READY" },
+  });
+
+  const { notifyArayanlarPrepReady } = await import("@/lib/arayanlar/notifications");
+  await notifyArayanlarPrepReady({
+    userId,
+    applicationId: app.id,
+    revision: app.submittedRevision,
+  });
+
+  return updated;
+}
+
 export async function getGuestBriefForMember(userId: string) {
+  await reconcileArayanlarPrepStatusFromJob(userId);
   const app = await prisma.arayanlarApplication.findUnique({ where: { userId } });
   if (!app || app.status === "WITHDRAWN") return null;
   if (app.prepStatus !== "READY" || app.submittedRevision < 1) return null;
@@ -672,8 +780,7 @@ export async function requestHostPackRegeneration(options: {
       arayanlarApplicationId: options.applicationId,
       kind: "ARAYANLAR_PREPARE",
       createdAt: { gte: since },
-      // platform regen jobs marked via providerMode prefix in result — count jobs with zero credit
-      creditCostSnapshot: 0,
+      providerMode: "platform_host_regen",
     },
   });
   if (recent >= HOST_PACK_REGEN_MAX) {

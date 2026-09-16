@@ -11,20 +11,23 @@ export default async function HazirligimPage() {
     <section className="space-y-6 print:space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-[family-name:var(--font-display)] text-3xl">Hazırlığım</h1>
+          <h1 className="font-[family-name:var(--font-display)] text-3xl">Kayıt öncesi notlarım</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            Yalnızca konuk brifi. Sunucu paketi, gizli vaka detayları veya dahili notlar burada yoktur. Yazdırma için
-            tarayıcının yazdır komutunu kullanabilirsin.
+            Kariyer Portresi kaydın için hazırlanan notlar. Atanan hosta özel notlar burada
+            gösterilmez. Yazdırma için tarayıcının yazdır komutunu kullanabilirsin.
           </p>
         </div>
         <Link href="/arayanlar" className="text-sm text-[var(--accent)] print:hidden">
-          Başvuruya dön
+          Başvuruma dön
         </Link>
       </div>
 
       {!pack ? (
         <p className="panel text-sm text-[var(--muted)]">
-          Konuk brifi henüz hazır değil. Başvurunu tamamlayıp üretimin bitmesini bekle.
+          Kayıt öncesi notların henüz hazır değil.{" "}
+          <Link href="/arayanlar#basvuru" className="text-[var(--accent)] underline">
+            Hazırlık durumunu gör
+          </Link>
         </p>
       ) : (
         <article className="panel space-y-5 text-sm leading-relaxed">

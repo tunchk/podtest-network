@@ -524,7 +524,7 @@ export function CvAssistPanel({
           <li>Önerileri gözden geçirip özel taslağa uygula</li>
         </ol>
         <p className="mt-3 text-sm text-[var(--muted)]">
-          Aynı özel CV ile Arayanlar bölüm hazırlığına da geçebilirsin:{" "}
+          Aynı özel CV ile Kariyer Portresi bölüm hazırlığına da geçebilirsin:{" "}
           <a href="/arayanlar?kaynak=cv#basvuru" className="text-[var(--accent)] underline">
             CV'mden bölüm hazırlığına başla
           </a>

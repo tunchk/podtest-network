@@ -166,7 +166,8 @@ export async function settleJobReservation(jobId: string) {
       where: { idempotencyKey: `reserve:${jobId}` },
     });
     if (!reserve) {
-      throw new Error("Missing reservation");
+      // Zero-cost / UNLIMITED_INTERNAL jobs never create a RESERVE row.
+      return null;
     }
 
     const released = await tx.creditLedgerEntry.findUnique({

@@ -21,6 +21,14 @@ export const auth = betterAuth({
         input: false,
         returned: true,
       },
+      aiUsagePolicy: {
+        type: ["STANDARD", "UNLIMITED_INTERNAL"],
+        required: false,
+        defaultValue: "STANDARD",
+        // Ops CLI only — members must not self-elevate via auth/profile APIs.
+        input: false,
+        returned: false,
+      },
     },
   },
   databaseHooks: {

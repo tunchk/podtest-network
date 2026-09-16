@@ -6,6 +6,7 @@ import {
   PROFILE_PREPARE_CREDIT_COST,
   ensureSponsoredProfilePrepareGrant,
   getAvailableCreditBalance,
+  getAvailableCreditBalanceForArayanlar,
   releaseJobReservation,
   reserveCreditsForJob,
   settleJobReservation,
@@ -21,8 +22,20 @@ import { generateArayanlarPreparation } from "@/lib/arayanlar/provider";
 import { arayanlarPrepareOutputSchema } from "@/lib/arayanlar/artifact-schema";
 import type { SubmittedFacts } from "@/lib/arayanlar/constants";
 import type { Prisma } from "@/generated/prisma/client";
+import { isUnlimitedAiUsage } from "@/lib/ai/usage-policy";
 
 export async function quoteProfilePrepare(userId: string) {
+  const unlimited = await isUnlimitedAiUsage(userId);
+  if (unlimited) {
+    const available = await getAvailableCreditBalanceForArayanlar(userId);
+    return {
+      cost: PROFILE_PREPARE_CREDIT_COST,
+      available,
+      canAfford: true,
+      currencyLabel: "AI kredisi",
+      unlimitedInternal: true as const,
+    };
+  }
   await ensureSponsoredProfilePrepareGrant(userId);
   const available = await getAvailableCreditBalance(userId);
   return {
@@ -30,6 +43,7 @@ export async function quoteProfilePrepare(userId: string) {
     available,
     canAfford: available >= PROFILE_PREPARE_CREDIT_COST,
     currencyLabel: "AI kredisi",
+    unlimitedInternal: false as const,
   };
 }
 
@@ -48,12 +62,17 @@ export async function createProfilePrepareJob(options: {
   const text = await readCvExtractedText(cv.id, options.userId);
   if (!text) throw new Error("CV_TEXT_MISSING");
 
-  await ensureSponsoredProfilePrepareGrant(options.userId);
+  const unlimited = await isUnlimitedAiUsage(options.userId);
+  if (!unlimited) {
+    await ensureSponsoredProfilePrepareGrant(options.userId);
+  }
   await ensurePrivateDirs();
 
   const jobId = randomUUID().replace(/-/g, "").slice(0, 24);
   const inputRelative = path.join("job-inputs", `job-${jobId}.txt`);
   await writeFile(path.join(getPrivateStorageRoot(), inputRelative), text, "utf8");
+
+  const creditCost = unlimited ? 0 : PROFILE_PREPARE_CREDIT_COST;
 
   try {
     const job = await prisma.$transaction(async (tx) => {
@@ -67,10 +86,14 @@ export async function createProfilePrepareJob(options: {
           cvDocumentId: cv.id,
           inputTextRelativePath: inputRelative,
           profileDraftRevision: profile.draftRevision,
-          creditCostSnapshot: PROFILE_PREPARE_CREDIT_COST,
+          creditCostSnapshot: creditCost,
           maxAttempts: 3,
         },
       });
+
+      if (unlimited) {
+        return created;
+      }
 
       const reservation = await reserveCreditsForJob({
         userId: options.userId,
@@ -411,11 +434,14 @@ async function processArayanlarPrepareJob(jobId: string, workerId: string) {
     return;
   }
 
-  const isHostRegen = job.creditCostSnapshot === 0;
+  // Host regen jobs are marked at creation (platform_host_regen) and cost 0.
+  // Guest UNLIMITED_INTERNAL prepares also cost 0 — do NOT treat cost alone as host regen,
+  // or prepStatus/READY notifications never update for unlimited members.
+  const isHostRegen = job.providerMode === "platform_host_regen";
   const revision = isHostRegen ? application.submittedRevision : job.profileDraftRevision;
 
   if (!isHostRegen && application.submittedRevision !== revision) {
-    await failArayanlarJob(
+    const failed = await failArayanlarJob(
       jobId,
       "revision_mismatch",
       "Gönderim revizyonu değişti; sonuç yayımlanmadı.",
@@ -424,6 +450,13 @@ async function processArayanlarPrepareJob(jobId: string, workerId: string) {
     await prisma.arayanlarApplication.update({
       where: { id: application.id },
       data: { prepStatus: "FAILED" },
+    });
+    await notifyGuestPrepFailedIfActionable({
+      userId: application.userId,
+      applicationId: application.id,
+      revision: application.submittedRevision,
+      job: failed,
+      isHostRegen,
     });
     return;
   }
@@ -461,14 +494,28 @@ async function processArayanlarPrepareJob(jobId: string, workerId: string) {
 
   if (!result.ok) {
     if (latest.attemptCount >= latest.maxAttempts || result.code === "provider_unavailable") {
-      await failArayanlarJob(jobId, result.code, result.message, job.creditCostSnapshot > 0, result.mode);
+      const failed = await failArayanlarJob(
+        jobId,
+        result.code,
+        result.message,
+        job.creditCostSnapshot > 0,
+        result.mode,
+      );
       if (!isHostRegen) {
         await prisma.arayanlarApplication.update({
           where: { id: application.id },
           data: { prepStatus: "FAILED" },
         });
+        await notifyGuestPrepFailedIfActionable({
+          userId: application.userId,
+          applicationId: application.id,
+          revision,
+          job: failed,
+          isHostRegen,
+        });
       }
     } else {
+      // Internal automatic retry — requeue only; no inbox notification.
       await prisma.aiJob.update({
         where: { id: jobId },
         data: {
@@ -492,11 +539,24 @@ async function processArayanlarPrepareJob(jobId: string, workerId: string) {
 
   const validated = arayanlarPrepareOutputSchema.safeParse(result.output);
   if (!validated.success) {
-    await failArayanlarJob(jobId, "schema_mismatch", "Çıktı doğrulanamadı.", job.creditCostSnapshot > 0, result.mode);
+    const failed = await failArayanlarJob(
+      jobId,
+      "schema_mismatch",
+      "Çıktı doğrulanamadı.",
+      job.creditCostSnapshot > 0,
+      result.mode,
+    );
     if (!isHostRegen) {
       await prisma.arayanlarApplication.update({
         where: { id: application.id },
         data: { prepStatus: "FAILED" },
+      });
+      await notifyGuestPrepFailedIfActionable({
+        userId: application.userId,
+        applicationId: application.id,
+        revision,
+        job: failed,
+        isHostRegen,
       });
     }
     return;
@@ -597,30 +657,35 @@ async function processArayanlarPrepareJob(jobId: string, workerId: string) {
       }
     });
   } catch {
-    await failArayanlarJob(jobId, "persist_failed", "Hazırlık kaydedilemedi.", job.creditCostSnapshot > 0, result.mode);
+    const failed = await failArayanlarJob(
+      jobId,
+      "persist_failed",
+      "Hazırlık kaydedilemedi.",
+      job.creditCostSnapshot > 0,
+      result.mode,
+    );
     if (!isHostRegen) {
       await prisma.arayanlarApplication.update({
         where: { id: application.id },
         data: { prepStatus: "FAILED" },
+      });
+      await notifyGuestPrepFailedIfActionable({
+        userId: application.userId,
+        applicationId: application.id,
+        revision,
+        job: failed,
+        isHostRegen,
       });
     }
     return;
   }
 
   if (!isHostRegen) {
-    const { createNotification } = await import("@/lib/notifications/service");
-    // Guest brief only — never mention host pack contents.
-    await createNotification({
+    const { notifyArayanlarPrepReady } = await import("@/lib/arayanlar/notifications");
+    await notifyArayanlarPrepReady({
       userId: application.userId,
-      kind: "arayanlar_prep_ready",
-      title: "Arayanlar hazırlığın hazır",
-      body: "Misafir hazırlık özetin görüntülenmeye hazır.",
-      href: "/arayanlar/hazirligim",
-      payload: {
-        applicationId: application.id,
-        submittedRevision: revision,
-      },
-      dedupeKey: `arayanlar_prep_ready:${application.id}:r${revision}`,
+      applicationId: application.id,
+      revision,
     });
   }
 
@@ -657,6 +722,27 @@ async function failArayanlarJob(
   ) {
     await releaseJobReservation(jobId);
   }
+  return updated;
+}
+
+/** Notify only when guest prep is FAILED and the member can still retry manually. */
+async function notifyGuestPrepFailedIfActionable(options: {
+  userId: string;
+  applicationId: string;
+  revision: number;
+  job: { id: string; attemptCount: number; maxAttempts: number; status: string };
+  isHostRegen: boolean;
+}) {
+  if (options.isHostRegen) return;
+  if (options.job.status !== "FAILED") return;
+  const { notifyArayanlarPrepFailedRetryable } = await import("@/lib/arayanlar/notifications");
+  await notifyArayanlarPrepFailedRetryable({
+    userId: options.userId,
+    applicationId: options.applicationId,
+    revision: options.revision,
+    attemptCount: options.job.attemptCount,
+    maxAttempts: options.job.maxAttempts,
+  });
 }
 
 async function failJob(jobId: string, code: string, message: string, mode?: string) {

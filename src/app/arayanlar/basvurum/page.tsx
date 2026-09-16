@@ -1,22 +1,10 @@
 import Link from "next/link";
 import { requireSession } from "@/lib/session";
 import { prisma } from "@/lib/db";
-
-const statusTr: Record<string, string> = {
-  DRAFT: "Taslak",
-  AWAITING_CONFIRMATION: "Onay bekliyor",
-  SUBMITTED: "Gönderildi",
-  WITHDRAWN: "Geri çekildi",
-};
-
-const prepTr: Record<string, string> = {
-  NOT_STARTED: "Başlamadı",
-  QUEUED: "Sırada",
-  RUNNING: "Hazırlanıyor",
-  READY: "Hazır",
-  FAILED: "Başarısız",
-  CANCELLED: "İptal",
-};
+import {
+  mapArayanlarUserFacingState,
+  userFacingStateLabel,
+} from "@/lib/arayanlar/presentation";
 
 export default async function BasvurumPage() {
   const session = await requireSession();
@@ -24,31 +12,55 @@ export default async function BasvurumPage() {
     where: { userId: session.user.id },
   });
 
+  let prepJob: { attemptCount: number; maxAttempts: number; status: string } | null = null;
+  if (app?.prepareJobId) {
+    prepJob = await prisma.aiJob.findUnique({
+      where: { id: app.prepareJobId },
+      select: { attemptCount: true, maxAttempts: true, status: true },
+    });
+  }
+
+  const facing = app
+    ? mapArayanlarUserFacingState({
+        status: app.status,
+        prepStatus: app.prepStatus,
+        prepJob,
+      })
+    : null;
+
   return (
     <section className="space-y-6">
       <h1 className="font-[family-name:var(--font-display)] text-3xl">Başvurum</h1>
-      {!app ? (
+      {!app || !facing ? (
         <p className="text-[var(--muted)]">
           Henüz başvuru yok.{" "}
           <Link href="/arayanlar" className="text-[var(--accent)] underline">
-            Başvuruya başla
+            Başvuruyu başlat
           </Link>
         </p>
       ) : (
-        <div className="panel space-y-2 text-sm">
+        <div className="panel space-y-3 text-sm">
           <p>
-            Durum: <strong>{statusTr[app.status] ?? app.status}</strong>
-          </p>
-          <p>
-            Hazırlık: <strong>{prepTr[app.prepStatus] ?? app.prepStatus}</strong>
+            Durum: <strong>{userFacingStateLabel(facing)}</strong>
           </p>
           <p className="text-[var(--muted)]">
-            Bu başvuru davet veya kesin kayıt tarihi değildir. Geri çekme sonrası sunucu erişimi
-            kaldırılır; daha önce indirilmiş dosyalar geri alınamaz.
+            Bu başvuru davet veya kesin kayıt tarihi değildir. Geri çekme sonrası host erişimi
+            kaldırılır; daha önce indirilmiş dosyalar geri alınamayabilir.
           </p>
-          <Link href="/arayanlar" className="btn btn-primary inline-flex">
-            Başvuruya dön
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {facing === "READY" ? (
+              <Link href="/arayanlar/hazirligim" className="btn btn-primary inline-flex">
+                Notlarımı aç
+              </Link>
+            ) : null}
+            <Link href="/arayanlar#basvuru" className="btn btn-secondary inline-flex">
+              {facing === "DRAFT" || facing === "AWAITING_CONFIRMATION"
+                ? "Başvuruma devam et"
+                : facing === "QUEUED" || facing === "RUNNING" || facing === "SUBMITTED_ACCEPTED"
+                  ? "Hazırlık durumunu gör"
+                  : "Başvuruma dön"}
+            </Link>
+          </div>
         </div>
       )}
     </section>

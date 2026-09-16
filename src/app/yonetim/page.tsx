@@ -59,7 +59,7 @@ export default async function AdminPage() {
                 Bölümler ve RSS içe aktarma
               </Link>
               <Link href="/sunucu/basvurular" className="underline">
-                Arayanlar sunucu başvuruları
+                Kariyer Portresi sunucu başvuruları
               </Link>
             </>
           ) : null}

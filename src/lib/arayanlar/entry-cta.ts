@@ -30,7 +30,7 @@ export function arayanlarEntryCta(app: ArayanlarEntryApp): ArayanlarEntryCta | n
     return {
       href: "/arayanlar/hazirligim",
       label: ui.arayanlar.viewPrep,
-      note: "Hazırlığın hazır.",
+      note: "Kayıt öncesi notların hazır.",
     };
   }
   if (app.status === "SUBMITTED") {
@@ -39,8 +39,8 @@ export function arayanlarEntryCta(app: ArayanlarEntryApp): ArayanlarEntryCta | n
       label: ui.arayanlar.viewStatus,
       note:
         app.prepStatus === "FAILED"
-          ? "Hazırlık tamamlanamadı. Aşağıdan durumu kontrol edebilir veya mevcut kurtarma adımlarını kullanabilirsin."
-          : "Başvurun alındı; hazırlık sürüyor.",
+          ? "Hazırlık tamamlanamadı. Aşağıdan ücretsiz yeniden deneyebilir veya bilgilerine dönebilirsin."
+          : "Başvurun alındı; hazırlık arka planda devam ediyor.",
     };
   }
   return null;

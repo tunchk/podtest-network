@@ -89,6 +89,7 @@ describe("m2.2 arayanlar preparation", () => {
     });
     await db.aiJob.deleteMany({ where: { userId: { in: ids } } });
     await db.arayanlarApplication.deleteMany({ where: { userId: { in: ids } } });
+    await db.inAppNotification.deleteMany({ where: { userId: { in: ids } } });
     await db.creditLedgerEntry.deleteMany({ where: { userId: { in: ids } } });
     await db.creditLot.deleteMany({ where: { userId: { in: ids } } });
     await db.hostAuthorization.deleteMany({ where: { userId: { in: ids } } });
@@ -265,6 +266,22 @@ describe("m2.2 arayanlar preparation", () => {
     const { jobId } = await submitApplication({ userId: guestId, facts });
     expect(jobId).toBeTruthy();
 
+    // Shared DB may have leftover QUEUED jobs from other suites — park them so we claim ours.
+    await db.aiJob.updateMany({
+      where: {
+        status: { in: ["QUEUED", "RUNNING"] },
+        id: { not: jobId },
+      },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+        finishedAt: new Date(),
+        leaseOwner: null,
+        safeErrorCode: "test_isolation",
+        safeErrorMessage: "Parked for m2.2 isolation",
+      },
+    });
+
     const workerId = `test-worker-${suffix}`;
     const claimed = await claimNextJob(workerId);
     expect(claimed?.id).toBe(jobId);
@@ -288,6 +305,16 @@ describe("m2.2 arayanlar preparation", () => {
 
     const guestJob = await db.aiJob.findUniqueOrThrow({ where: { id: jobId } });
     expect(JSON.stringify(guestJob.resultJson)).not.toMatch(/mainQuestions|supportingFacts/);
+
+    // Milestone notifications: submit + READY once; no QUEUED/RUNNING kinds.
+    const notifs = await db.inAppNotification.findMany({ where: { userId: guestId } });
+    const kinds = notifs.map((n) => n.kind);
+    expect(kinds.filter((k) => k === "arayanlar_application_submitted")).toHaveLength(1);
+    expect(kinds.filter((k) => k === "arayanlar_prep_ready")).toHaveLength(1);
+    expect(kinds.some((k) => /queued|running/i.test(k))).toBe(false);
+    const ready = notifs.find((n) => n.kind === "arayanlar_prep_ready");
+    expect(ready?.title).toBe("Kayıt öncesi notların hazır");
+    expect(ready?.href).toBe("/arayanlar/hazirligim");
   });
 
   it("denies unassigned host and guest host-pack access; assignment works", async () => {
@@ -385,6 +412,12 @@ describe("m2.2 arayanlar preparation", () => {
     const withdrawn = await db.arayanlarApplication.findUniqueOrThrow({ where: { userId: guestId } });
     expect(withdrawn.status).toBe("WITHDRAWN");
     expect(withdrawn.assignedHostUserId).toBeNull();
+
+    const withdrawnNotifs = await db.inAppNotification.findMany({
+      where: { userId: guestId, kind: "arayanlar_application_withdrawn" },
+    });
+    expect(withdrawnNotifs).toHaveLength(1);
+    expect(withdrawnNotifs[0]?.body).toBe("Kariyer Portresi başvurun geri çekildi.");
   });
 
   it("provider failure path preserves answers and releases credits on failed job", async () => {

@@ -15,7 +15,7 @@ export const ui = {
     account: "Hesabım",
     messages: "Mesajlar",
     notifications: "Bildirimler",
-    arayanlar: "Arayanlar",
+    arayanlar: "Kariyer Portresi",
     host: "Sunucu",
     hostArea: "Sunucu alanı",
     admin: "Yönetim",
@@ -28,7 +28,7 @@ export const ui = {
     lead: "Yazılım, kalite, mühendislik ve kariyer etrafında açık bir topluluk. Herkes katılabilir; üyelik için başvuru, mülakat veya test görevi yok.",
     ctaJoin: "Katıl",
     ctaBrowse: "Üyelere göz at",
-    ctaArayanlar: "PodTest Arayanlar'a katıl",
+    ctaArayanlar: "Kariyer Portresi'ne katıl",
     laterNote: "Ödemeler ve ek üyelik özellikleri yol haritasında — henüz burada değil.",
   },
   auth: {
@@ -113,13 +113,13 @@ export const ui = {
     episodesLead: "PodTest sohbetlerini keşfet ve dinle.",
   },
   arayanlar: {
-    title: "PodTest Arayanlar",
+    title: "Kariyer Portresi",
     lead:
       "Kısa bir sohbetle ne yaptığını, nasıl düşündüğünü ve ne aradığını anlatırsın. Katılım isteğe bağlıdır; CV zorunlu değildir.",
-    apply: "Başvur",
-    continue: "Başvuruna devam et",
-    viewPrep: "Hazırlığını aç",
-    viewStatus: "Durumu gör",
+    apply: "Başvuruyu başlat",
+    continue: "Başvuruma devam et",
+    viewPrep: "Notlarımı aç",
+    viewStatus: "Hazırlık durumunu gör",
     restart: "Yeniden başla",
     fromCv: "CV'mden bölüm hazırlığına başla",
     fromCvNote:
