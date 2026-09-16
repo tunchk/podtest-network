@@ -25,9 +25,10 @@ export default async function SunucuBasvuruDetailPage({ params }: Props) {
     <section className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-[family-name:var(--font-display)] text-3xl">Üretim paketi</h1>
+          <h1 className="font-[family-name:var(--font-display)] text-3xl">Yapımcı notları</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
             Üye onaylı gerçekler değiştirilemez. Düzenlemelerin ayrı saklanır; yeniden üretim onları silmez.
+            Ham CV burada gösterilmez.
           </p>
         </div>
         <Link href="/sunucu/basvurular" className="text-sm text-[var(--accent)] print:hidden">
@@ -48,7 +49,12 @@ export default async function SunucuBasvuruDetailPage({ params }: Props) {
         </ul>
       </article>
 
-      <HostPackEditor applicationId={id} initial={result.effective} hasHostEdits={result.hasHostEdits} />
+      <HostPackEditor
+        applicationId={id}
+        initial={result.effective}
+        hasHostEdits={result.hasHostEdits}
+        schemaKind={result.schemaKind}
+      />
     </section>
   );
 }

@@ -150,8 +150,8 @@ async function main() {
       applicationId: app.id,
     });
     if (!hostPack.ok) throw new Error(`host denied: ${hostPack.reason}`);
-    if (hostPack.effective.rapidRound.questions.length !== 5) {
-      throw new Error("rapid round incomplete");
+    if (hostPack.effective.rapidFire.length < 5) {
+      throw new Error("rapid fire incomplete");
     }
 
     console.log("[live-m22] LIVE_VERIFY_PASS");
@@ -159,8 +159,8 @@ async function main() {
       JSON.stringify({
         applicationId: app.id,
         jobId,
-        guestBriefTopic: brief.brief.selectedStoryTopic,
-        hostCaseTitle: hostPack.effective.case.title,
+        guestStoryTitle: brief.brief.storyCandidates[0]?.title ?? null,
+        hostThinkingScenarioChars: hostPack.effective.thinkingScenario.scenario.length,
         creditsBefore: before,
         creditsAfter: after,
       }),

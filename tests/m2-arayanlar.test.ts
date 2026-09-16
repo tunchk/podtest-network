@@ -300,7 +300,10 @@ describe("m2.2 arayanlar preparation", () => {
     expect(balanceAfter).toBe(balanceBefore - 1);
 
     const guestBrief = await getGuestBriefForMember(guestId);
-    expect(guestBrief?.brief.confirmedTargetRole).toContain("QA");
+    expect(guestBrief?.brief.identitySignals.join(" ")).toMatch(/QA|hedef|rol|stub|Onaylı/i);
+    expect(guestBrief?.brief.storyCandidates.length).toBeGreaterThanOrEqual(1);
+    expect(guestBrief?.brief.closing.fixedQuestion).toMatch(/bu kişiyle konuşmalıyım/);
+    expect(JSON.stringify(guestBrief)).not.toMatch(/coldOpen|timelineOverview|recordingChecklist/i);
     expect(JSON.stringify(guestBrief)).not.toMatch(/supportingFacts|rapidRound|hostPack/i);
 
     const guestJob = await db.aiJob.findUniqueOrThrow({ where: { id: jobId } });
@@ -338,8 +341,9 @@ describe("m2.2 arayanlar preparation", () => {
     });
     expect(allowed.ok).toBe(true);
     if (allowed.ok) {
-      expect(allowed.effective.case.supportingFacts).toHaveLength(2);
-      expect(allowed.effective.rapidRound.questions).toHaveLength(5);
+      expect(allowed.effective.storyCandidates.length).toBeGreaterThanOrEqual(1);
+      expect(allowed.effective.thinkingScenario.scenario.length).toBeGreaterThan(10);
+      expect(allowed.effective.rapidFire.length).toBeGreaterThanOrEqual(5);
     }
 
     const other = await getHostPackForAssignedHost({
@@ -378,9 +382,9 @@ describe("m2.2 arayanlar preparation", () => {
 
     const edited: HostPack = {
       ...pack.effective,
-      factualIntroduction: {
-        ...pack.effective.factualIntroduction,
-        text: "SUNUCU DUZENLEME KORUNMALI",
+      thinkingScenario: {
+        ...pack.effective.thinkingScenario,
+        scenario: "SUNUCU DUZENLEME KORUNMALI",
       },
     };
     await saveHostPackEdits({
@@ -393,7 +397,7 @@ describe("m2.2 arayanlar preparation", () => {
       hostUserId: hostId,
       applicationId: app.id,
     });
-    expect(again.ok && again.effective.factualIntroduction.text).toContain("SUNUCU DUZENLEME");
+    expect(again.ok && again.effective.thinkingScenario.scenario).toContain("SUNUCU DUZENLEME");
 
     const guestView = toGuestApplicationView(app);
     expect(JSON.stringify(guestView)).not.toMatch(/SUNUCU DUZENLEME|supportingFacts/);

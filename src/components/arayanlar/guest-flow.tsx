@@ -879,14 +879,16 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
           ) : null}
 
           {!withdrawOpen ? (
-            <button
-              type="button"
-              className="btn btn-ghost text-[var(--danger)]"
-              disabled={busy}
-              onClick={() => setWithdrawOpen(true)}
-            >
-              Başvuruyu geri çek
-            </button>
+            <div className="border-t border-[var(--line)] pt-4">
+              <button
+                type="button"
+                className="btn btn-ghost text-[var(--danger)]"
+                disabled={busy}
+                onClick={() => setWithdrawOpen(true)}
+              >
+                Başvuruyu geri çek
+              </button>
+            </div>
           ) : (
             <div
               role="dialog"

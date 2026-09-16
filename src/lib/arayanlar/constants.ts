@@ -1,5 +1,5 @@
 /** Editorial contract version bound to submitted revisions and artifacts. */
-export const EDITORIAL_TEMPLATE_VERSION = "arayanlar-18m-v1";
+export const EDITORIAL_TEMPLATE_VERSION = "kariyer-portresi-producer-v1";
 
 export const MAX_PREPARATION_QUESTIONS = 5;
 

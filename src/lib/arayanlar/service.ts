@@ -21,7 +21,14 @@ import {
   type QuestionKey,
 } from "@/lib/arayanlar/conversation";
 import { proposeArayanlarFactsFromOwnedCv } from "@/lib/arayanlar/cv-proposals";
-import { guestBriefSchema, hostPackSchema, type HostPack } from "@/lib/arayanlar/artifact-schema";
+import {
+  PREPARATION_SCHEMA_VERSION,
+  arayanlarPrepareOutputSchema,
+  parseStoredGuestArtifact,
+  parseStoredHostArtifact,
+  type HostPack,
+  type ArayanlarPreparation,
+} from "@/lib/arayanlar/artifact-schema";
 import { canHostAccessApplication, isAuthorizedHost } from "@/lib/arayanlar/host-auth";
 import {
   assertArayanlarChatLimits,
@@ -678,13 +685,15 @@ export async function getGuestBriefForMember(userId: string) {
     },
   });
   if (!artifact) return null;
-  const parsed = guestBriefSchema.safeParse(artifact.generatedJson);
-  if (!parsed.success) return null;
+  const parsed = parseStoredGuestArtifact(artifact.generatedJson);
+  if (!parsed) return null;
   return {
     applicationId: app.id,
     submittedRevision: artifact.submittedRevision,
     editorialTemplateVersion: artifact.editorialTemplateVersion,
-    brief: parsed.data,
+    schemaKind: parsed.kind,
+    brief: parsed.view,
+    preparation: parsed.preparation ?? null,
   };
 }
 
@@ -711,11 +720,11 @@ export async function getHostPackForAssignedHost(options: {
   });
   if (!artifact) return { ok: false as const, reason: "missing_artifact" };
 
-  const generated = hostPackSchema.safeParse(artifact.generatedJson);
-  if (!generated.success) return { ok: false as const, reason: "invalid_artifact" };
+  const generated = parseStoredHostArtifact(artifact.generatedJson);
+  if (!generated) return { ok: false as const, reason: "invalid_artifact" };
 
   const edited = artifact.hostEditedJson
-    ? hostPackSchema.safeParse(artifact.hostEditedJson)
+    ? parseStoredHostArtifact(artifact.hostEditedJson)
     : null;
 
   return {
@@ -728,22 +737,21 @@ export async function getHostPackForAssignedHost(options: {
       submittedFacts: app.submittedFacts,
       prepStatus: app.prepStatus,
     },
-    generated: generated.data,
-    effective: (edited?.success ? edited.data : generated.data) as HostPack,
-    hasHostEdits: Boolean(edited?.success),
+    generated: generated.view,
+    effective: (edited?.view ?? generated.view) as HostPack,
+    preparation: (edited?.preparation ?? generated.preparation) ?? null,
+    schemaKind: edited?.kind ?? generated.kind,
+    hasHostEdits: Boolean(edited),
   };
 }
 
 export async function saveHostPackEdits(options: {
   hostUserId: string;
   applicationId: string;
-  edits: HostPack;
+  edits: HostPack | { schemaVersion: string; preparation: ArayanlarPreparation };
 }) {
   const access = await canHostAccessApplication(options);
   if (!access.ok) throw new Error(access.reason);
-
-  const parsed = hostPackSchema.safeParse(options.edits);
-  if (!parsed.success) throw new Error("INVALID_PACK");
 
   const app = access.application;
   const artifact = await prisma.arayanlarArtifact.findUnique({
@@ -756,6 +764,33 @@ export async function saveHostPackEdits(options: {
     },
   });
   if (!artifact) throw new Error("NOT_FOUND");
+
+  // Accept either full prepare payload or host view reconstructed into preparation.
+  let payload: unknown = options.edits;
+  if (
+    options.edits &&
+    typeof options.edits === "object" &&
+    "identityPrep" in options.edits &&
+    !("preparation" in options.edits)
+  ) {
+    const view = options.edits as HostPack;
+    const preparation: ArayanlarPreparation = {
+      identityPrep: view.identityPrep,
+      storyCandidates: view.storyCandidates,
+      thinkingScenario: view.thinkingScenario,
+      jobSearchPrep: view.jobSearchPrep,
+      rapidFire: view.rapidFire,
+      closingPrep: view.closingPrep,
+      overallMissingInformation: view.overallMissingInformation,
+    };
+    payload = {
+      schemaVersion: PREPARATION_SCHEMA_VERSION,
+      preparation,
+    };
+  }
+
+  const parsed = arayanlarPrepareOutputSchema.safeParse(payload);
+  if (!parsed.success) throw new Error("INVALID_PACK");
 
   return prisma.arayanlarArtifact.update({
     where: { id: artifact.id },

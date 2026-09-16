@@ -213,11 +213,49 @@ export async function requestJobRetry(jobId: string, userId: string) {
   });
 }
 
+/** Default lease for short profile-prepare jobs. */
 const LEASE_MS = 120_000;
+/**
+ * Kariyer Portresi producer-notes (gpt-5.6-sol + medium reasoning) regularly
+ * exceeds 2 minutes. Keep the lease alive so another worker cannot reclaim
+ * mid-flight and leave the original attempt abandoned after OpenAI returns.
+ */
+const ARAYANLAR_LEASE_MS = 10 * 60_000;
+/** Refresh cadence while waiting on the provider (well under lease length). */
+const ARAYANLAR_LEASE_HEARTBEAT_MS = 60_000;
+
+function leaseMsForKind(kind: string) {
+  return kind === "ARAYANLAR_PREPARE" ? ARAYANLAR_LEASE_MS : LEASE_MS;
+}
+
+function startLeaseHeartbeat(options: {
+  jobId: string;
+  workerId: string;
+  leaseMs: number;
+  intervalMs?: number;
+}) {
+  const intervalMs = options.intervalMs ?? ARAYANLAR_LEASE_HEARTBEAT_MS;
+  const timer = setInterval(() => {
+    void prisma.aiJob
+      .updateMany({
+        where: {
+          id: options.jobId,
+          leaseOwner: options.workerId,
+          status: "RUNNING",
+        },
+        data: { leaseExpiresAt: new Date(Date.now() + options.leaseMs) },
+      })
+      .catch(() => {
+        // Best-effort — completion path still checks lease ownership.
+      });
+  }, intervalMs);
+  // Do not keep the event loop alive solely for heartbeats if the process is exiting.
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
 
 export async function claimNextJob(workerId: string) {
   const now = new Date();
-  const leaseExpires = new Date(now.getTime() + LEASE_MS);
   let releaseId: string | null = null;
 
   const job = await prisma.$transaction(async (tx) => {
@@ -258,6 +296,8 @@ export async function claimNextJob(workerId: string) {
       releaseId = id;
       return null;
     }
+
+    const leaseExpires = new Date(now.getTime() + leaseMsForKind(current.kind));
 
     return tx.aiJob.update({
       where: { id },
@@ -472,15 +512,54 @@ async function processArayanlarPrepareJob(jobId: string, workerId: string) {
     data: { prepStatus: isHostRegen ? application.prepStatus : "RUNNING" },
   });
 
+  const arayanlarLeaseMs = leaseMsForKind("ARAYANLAR_PREPARE");
   await prisma.aiJob.updateMany({
     where: { id: jobId, leaseOwner: workerId, status: "RUNNING" },
-    data: { leaseExpiresAt: new Date(Date.now() + LEASE_MS) },
+    data: { leaseExpiresAt: new Date(Date.now() + arayanlarLeaseMs) },
   });
 
-  const result = await generateArayanlarPreparation({
-    facts,
-    editorialTemplateVersion: application.editorialTemplateVersion,
+  // Optional CV grounding — never embedded into guest/host artifacts as raw text.
+  let cvText: string | null = null;
+  const cvDoc = await prisma.cvDocument.findFirst({
+    where: { userId: application.userId, deletedAt: null, extractionStatus: "OK" },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
   });
+  if (cvDoc) {
+    const { readCvExtractedText } = await import("@/lib/cv/service");
+    cvText = await readCvExtractedText(cvDoc.id, application.userId);
+  }
+  const profile = await prisma.profile.findUnique({
+    where: { userId: application.userId },
+    select: { headline: true, bio: true, skills: true },
+  });
+
+  // Keep lease alive across long Responses API / reasoning calls.
+  const stopLeaseHeartbeat = startLeaseHeartbeat({
+    jobId,
+    workerId,
+    leaseMs: arayanlarLeaseMs,
+  });
+  const openaiStartedAt = Date.now();
+  console.log(
+    `[ai-worker] arayanlar openai start job=${jobId} revision=${revision} cvChars=${cvText?.length ?? 0}`,
+  );
+  let result: Awaited<ReturnType<typeof generateArayanlarPreparation>>;
+  try {
+    result = await generateArayanlarPreparation({
+      facts,
+      editorialTemplateVersion: application.editorialTemplateVersion,
+      cvText,
+      profileHints: profile,
+    });
+  } finally {
+    stopLeaseHeartbeat();
+  }
+  console.log(
+    `[ai-worker] arayanlar openai done job=${jobId} ok=${result.ok} ms=${Date.now() - openaiStartedAt}${
+      result.ok ? "" : ` code=${result.code}`
+    }`,
+  );
 
   const latest = await prisma.aiJob.findUnique({ where: { id: jobId } });
   const latestApp = await prisma.arayanlarApplication.findUnique({
@@ -490,7 +569,12 @@ async function processArayanlarPrepareJob(jobId: string, workerId: string) {
     if (job.creditCostSnapshot > 0) await releaseJobReservation(jobId);
     return;
   }
-  if (latest.leaseOwner !== workerId) return;
+  if (latest.leaseOwner !== workerId) {
+    console.warn(
+      `[ai-worker] arayanlar stale lease after provider job=${jobId} owner=${latest.leaseOwner} worker=${workerId}`,
+    );
+    return;
+  }
 
   if (!result.ok) {
     if (latest.attemptCount >= latest.maxAttempts || result.code === "provider_unavailable") {
@@ -596,12 +680,12 @@ async function processArayanlarPrepareJob(jobId: string, workerId: string) {
           kind: "GUEST_BRIEF",
           submittedRevision: revision,
           editorialTemplateVersion: appNow.editorialTemplateVersion,
-          generatedJson: validated.data.guestBrief as unknown as Prisma.InputJsonValue,
+          generatedJson: validated.data as unknown as Prisma.InputJsonValue,
         },
         update: isHostRegen
           ? {}
           : {
-              generatedJson: validated.data.guestBrief as unknown as Prisma.InputJsonValue,
+              generatedJson: validated.data as unknown as Prisma.InputJsonValue,
               editorialTemplateVersion: appNow.editorialTemplateVersion,
             },
       });
@@ -619,10 +703,10 @@ async function processArayanlarPrepareJob(jobId: string, workerId: string) {
           kind: "HOST_PACK",
           submittedRevision: revision,
           editorialTemplateVersion: appNow.editorialTemplateVersion,
-          generatedJson: validated.data.hostPack as unknown as Prisma.InputJsonValue,
+          generatedJson: validated.data as unknown as Prisma.InputJsonValue,
         },
         update: {
-          generatedJson: validated.data.hostPack as unknown as Prisma.InputJsonValue,
+          generatedJson: validated.data as unknown as Prisma.InputJsonValue,
           editorialTemplateVersion: appNow.editorialTemplateVersion,
           // Preserve host edits on regeneration
           hostEditedJson: existingHost?.hostEditedJson ?? undefined,
@@ -633,12 +717,14 @@ async function processArayanlarPrepareJob(jobId: string, workerId: string) {
         where: { id: jobId },
         data: {
           status: "READY",
-          // Guest-safe summary only — never embed host pack in job.resultJson
+          // Guest-safe summary only — never embed preparation body in job.resultJson
           resultJson: {
-            guestBriefReady: true,
-            hostPackReady: true,
+            preparationReady: true,
+            schemaVersion: validated.data.schemaVersion,
             submittedRevision: revision,
             labeledStub: result.labeledStub,
+            storyCandidateCount: validated.data.preparation.storyCandidates.length,
+            rapidFireCount: validated.data.preparation.rapidFire.length,
           } as Prisma.InputJsonValue,
           providerMode: result.mode,
           finishedAt: new Date(),

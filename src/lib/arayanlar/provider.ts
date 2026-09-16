@@ -2,36 +2,79 @@ import OpenAI from "openai";
 import {
   ARAYANLAR_PREPARE_JSON_SCHEMA,
   arayanlarPrepareOutputSchema,
+  FIXED_CLOSING_QUESTION,
+  PREPARATION_SCHEMA_VERSION,
   type ArayanlarPrepareOutput,
-  type GuestBrief,
-  type HostPack,
+  type ArayanlarPreparation,
 } from "@/lib/arayanlar/artifact-schema";
-import { EDITORIAL_TIMELINE } from "@/lib/arayanlar/constants";
 import type { SubmittedFacts } from "@/lib/arayanlar/constants";
 import {
   isProductionRuntime,
   resolveProviderConfig,
   type AiProviderMode,
 } from "@/lib/ai/provider";
+import {
+  ARAYANLAR_PREP_REASONING_EFFORT,
+  resolveArayanlarPrepModel,
+} from "@/lib/arayanlar/prep-model";
 
 export type ArayanlarPrepareResult =
   | { ok: true; mode: AiProviderMode; output: ArayanlarPrepareOutput; labeledStub: boolean }
   | { ok: false; mode: AiProviderMode; code: string; message: string };
 
-const PREPARE_SYSTEM = `Sen PodTest Arayanlar için hazırlık paketleri üretirsin.
-Kurallar:
-- Yalnızca üyenin onayladığı gerçekleri kullan; CV ham metni veya özel sohbet geçmişi yok.
-- İdeal yanıtlar, ezberlenecek senaryolar veya rol-özel vaka prova metni üretme (konuk için).
-- Sunucu paketi kişiselleştirilmiş sorular ve TEK kısa vaka içerebilir; vakayı konuğa ezberletecek şekilde yazma.
-- Soğuk açılış için uydurma alıntı YASAK; yalnızca sonra seçilecek gerçek bir an notu.
-- Tarih, seçim kararı, tavsiye, işe alım garantisi veya yayınlanmış bölüm iddiası uydurma.
-- Başvuru davet veya kesin kayıt tarihi değildir — bunu disclaimer'da belirt.
-- Türkçe yaz. Sıcak, sohbet tarzı, profesyonel. Puanlama/aşağılamaya yer yok.
-- JSON şemasına sıkı uy.
-- hostPack.mainQuestions en az 3 soru içermeli (her birinde followUps dizisi).
-- hostPack.case.supportingFacts tam 2 madde; rapidRound.questions tam 5; alternatives tam 2.
-- timingAndTransitions editorial timeline segmentlerini kapsamalı.
-- Hassas / özel nitelikli veya konu dışı kişisel verileri (sağlık, siyasi görüş, din, sendika, ailevi mahremiyet vb.) hazırlık çıktısına KOYMA. Yalnızca mesleki bilgiler kullan; uydurma veya çıkarım yapma.`;
+export type PrepareGroundingInput = {
+  facts: SubmittedFacts;
+  editorialTemplateVersion: string;
+  /** Extracted CV text for evidence grounding — never returned to client as-is. */
+  cvText?: string | null;
+  profileHints?: {
+    headline?: string | null;
+    bio?: string | null;
+    skills?: string[] | null;
+  } | null;
+};
+
+const PREPARE_SYSTEM = `Sen PodTest Kariyer Portresi için yapımcı araştırma notları üretirsin.
+
+Ürün tezi: "CV ne yaptığını söylüyor. Biz nasıl düşündüğünü de göstermeye çalışıyoruz."
+Bu bir genel mülakat/podcast koçluğu ürünü DEĞİLDİR.
+
+Sabit kayıt formatı (AI üretmez, yalnızca notları bu yapıya hizmet eder):
+1) Sen kimsin?
+2) Bana bir hikâye anlat
+3) Masaya bir problem koyuyorum
+4) Ben ne arıyorum?
+5) Hızlı tur
+6) Kapanış
+
+YASAK çıktılar:
+- cold open / soğuk açılış metni
+- kayıt timeline / zaman çizelgesi
+- ekipman, mikrofon, ortam, checklist tavsiyesi
+- genel özgüven / koçluk tavsiyesi
+- uydurma başarı, metrik, ekip büyüklüğü, terfi, etki
+- düşünme senaryosuna model cevabı
+- kapanış sorusuna hazır cevap metni
+- iş arama tercihlerini iş geçmişinden kesin tercih diye yazmak
+
+Kanıt kuralları:
+- Yalnızca CV metni + onaylı başvuru gerçekleri + onaylı profil alanlarından doğrulananları "olgu" yaz.
+- Eksik bilgiyi açıkça missing olarak yaz; bu başarıdır.
+- Hipotetik içerik YALNIZCA thinkingScenario içindedir.
+- Türkçe yaz. Profesyonel, spesifik, yapımcı dili.
+
+Özgüllük testi (zorunlu):
+"Bu not, küçük değişikliklerle 100 benzer QA/mühendislik profesyoneline uyuyorsa, adayın somut kanıtıyla yeniden yaz."
+
+Kaçınılacak genel ifadeler (kanıta bağlanmadıkça):
+"Deneyimlerinizi düşünün", "Başarılarınızı anlatın", "Güçlü yönlerinizi paylaşın", "Örneklerle destekleyin", "Kendinizi net ifade edin", "Ortamınızı hazırlayın".
+
+closingPrep.fixedQuestion tam olarak şu olmalı:
+${FIXED_CLOSING_QUESTION}
+
+schemaVersion tam olarak "${PREPARATION_SCHEMA_VERSION}" olmalı.
+storyCandidates en fazla 3; rapidFire 5–8 madde.
+JSON şemasına sıkı uy.`;
 
 function asString(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -42,249 +85,353 @@ function asStringArray(value: unknown): string[] {
   return value.map((v) => String(v ?? "").trim()).filter(Boolean);
 }
 
-/** Coerce near-valid provider JSON into schema shape without inventing biography. */
+function scrubFacts(facts: SubmittedFacts): SubmittedFacts {
+  // sync import avoided — caller may already scrub; keep local soft trim
+  return {
+    ...facts,
+    targetRole: facts.targetRole?.trim() ?? "",
+    storyTopic: facts.storyTopic?.trim() ?? "",
+    contribution: facts.contribution?.trim() ?? "",
+    workPreferences: facts.workPreferences?.trim() ?? "",
+    excludedTopics: facts.excludedTopics?.trim() ?? "",
+    contactChannel: facts.contactChannel?.trim() ?? "",
+  };
+}
+
+/** Coerce near-valid provider JSON without inventing biography. */
 export function normalizeArayanlarOutput(
   raw: unknown,
   facts: SubmittedFacts,
 ): unknown {
   if (!raw || typeof raw !== "object") return raw;
   const root = raw as Record<string, unknown>;
-  const guest = (root.guestBrief && typeof root.guestBrief === "object"
-    ? root.guestBrief
-    : {}) as Record<string, unknown>;
-  const host = (root.hostPack && typeof root.hostPack === "object"
-    ? root.hostPack
-    : {}) as Record<string, unknown>;
+  const prepRaw =
+    root.preparation && typeof root.preparation === "object"
+      ? (root.preparation as Record<string, unknown>)
+      : root;
 
-  const intro =
-    host.factualIntroduction && typeof host.factualIntroduction === "object"
-      ? (host.factualIntroduction as Record<string, unknown>)
+  const identity =
+    prepRaw.identityPrep && typeof prepRaw.identityPrep === "object"
+      ? (prepRaw.identityPrep as Record<string, unknown>)
+      : {};
+  const job =
+    prepRaw.jobSearchPrep && typeof prepRaw.jobSearchPrep === "object"
+      ? (prepRaw.jobSearchPrep as Record<string, unknown>)
+      : {};
+  const thinking =
+    prepRaw.thinkingScenario && typeof prepRaw.thinkingScenario === "object"
+      ? (prepRaw.thinkingScenario as Record<string, unknown>)
+      : {};
+  const closing =
+    prepRaw.closingPrep && typeof prepRaw.closingPrep === "object"
+      ? (prepRaw.closingPrep as Record<string, unknown>)
       : {};
 
-  let mainQuestions = Array.isArray(host.mainQuestions) ? [...host.mainQuestions] : [];
-  const ensureQuestion = (q: string) => ({ question: q, followUps: [] as string[] });
-  while (mainQuestions.length < 3) {
-    const defaults = [
-      ensureQuestion(`Hedef rolün (${facts.targetRole || "belirsiz"}) için seni ne motive ediyor?`),
-      ensureQuestion(`Anlattığın deneyimde (${facts.storyTopic || "konu"}) asıl zorluk neydi?`),
-      ensureQuestion("İstediğin çalışma ortamını nasıl tanımlarsın?"),
+  let signals = asStringArray(identity.profileSignals);
+  while (signals.length < 3) {
+    const fillers = [
+      facts.targetRole ? `Onaylı hedef yön: ${facts.targetRole}` : "Hedef rol onaylı metinde net değil",
+      facts.storyTopic
+        ? `Onaylı deneyim konusu: ${facts.storyTopic.slice(0, 120)}`
+        : "Seçilmiş hikâye konusu net değil",
+      facts.contribution
+        ? `Onaylı katkı ifadesi: ${facts.contribution.slice(0, 120)}`
+        : "Katkı ifadesi net değil",
     ];
-    mainQuestions.push(defaults[mainQuestions.length]!);
+    signals.push(fillers[signals.length]!);
   }
-  mainQuestions = mainQuestions.slice(0, 8).map((item) => {
+  signals = signals.slice(0, 6);
+
+  let themes = asStringArray(identity.careerThemes);
+  if (!themes.length) themes = ["Onaylı başvuru verilerinden tema çıkarımı sınırlı"];
+  themes = themes.slice(0, 8);
+
+  let stories = Array.isArray(prepRaw.storyCandidates) ? [...prepRaw.storyCandidates] : [];
+  if (!stories.length) {
+    stories = [
+      {
+        title: facts.storyTopic || "Onaylı deneyim konusu",
+        sourceExperience: facts.storyTopic || "Başvuruda belirtilen deneyim",
+        whyThisCouldBeAStory:
+          "Üyenin onayladığı konu; ölçülebilir sonuç CV/başvuruda yoksa eksik olarak işaretlenmeli.",
+        knownFacts: [
+          facts.storyTopic || "Konu belirsiz",
+          facts.contribution || "Katkı belirsiz",
+        ].filter(Boolean),
+        missingDetails: [
+          "Ölçülebilir sonuç belirtilmemiş olabilir",
+          "Karar / trade-off detayı eksik olabilir",
+        ],
+        guestPrepQuestions: [
+          "Bu deneyimde somut olarak ne değişti ve bunu neyle kanıtlıyorsun?",
+        ],
+        hostQuestions: ["Bu hikâyede asıl belirsizlik neydi?"],
+        followUpQuestions: ["Senin kişisel kararın neydi?"],
+        sourceReferences: ["submitted_facts.storyTopic"],
+      },
+    ];
+  }
+  stories = stories.slice(0, 3).map((item) => {
     const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+    const known = asStringArray(row.knownFacts);
     return {
-      question: asString(row.question, "Kısa bir takip sorusu"),
-      followUps: asStringArray(row.followUps).slice(0, 3),
+      title: asString(row.title, facts.storyTopic || "Deneyim adayı"),
+      sourceExperience: asString(row.sourceExperience, "CV / onaylı başvuru"),
+      whyThisCouldBeAStory: asString(
+        row.whyThisCouldBeAStory,
+        "Adayın kendi deneyimine bağlı potansiyel hikâye.",
+      ),
+      knownFacts: known.length ? known.slice(0, 12) : [facts.storyTopic || "Belirsiz"],
+      missingDetails: asStringArray(row.missingDetails).slice(0, 12),
+      guestPrepQuestions: (() => {
+        const q = asStringArray(row.guestPrepQuestions);
+        return q.length ? q.slice(0, 8) : ["Bu deneyimde eksik kalan somut detay nedir?"];
+      })(),
+      hostQuestions: (() => {
+        const q = asStringArray(row.hostQuestions);
+        return q.length ? q.slice(0, 8) : ["Bu hikâyede trade-off neydi?"];
+      })(),
+      followUpQuestions: asStringArray(row.followUpQuestions).slice(0, 8),
+      sourceReferences: (() => {
+        const s = asStringArray(row.sourceReferences);
+        return s.length ? s.slice(0, 8) : ["submitted_facts"];
+      })(),
     };
   });
 
-  const caseObj =
-    host.case && typeof host.case === "object" ? (host.case as Record<string, unknown>) : {};
-  let supportingFacts = asStringArray(caseObj.supportingFacts);
-  while (supportingFacts.length < 2) {
-    supportingFacts.push(
-      supportingFacts.length === 0
-        ? facts.storyTopic || "Üye hikâyesi (onaylı)"
-        : facts.contribution || "Üye katkısı (onaylı)",
-    );
-  }
-  supportingFacts = supportingFacts.slice(0, 2);
-
-  const rapid =
-    host.rapidRound && typeof host.rapidRound === "object"
-      ? (host.rapidRound as Record<string, unknown>)
-      : {};
-  let questions = asStringArray(rapid.questions);
+  let rapid = Array.isArray(prepRaw.rapidFire) ? [...prepRaw.rapidFire] : [];
   const rapidDefaults = [
-    "Sabah ilk baktığın araç?",
-    "Bir cümlelik tempo tercihin?",
-    "En iyi geri bildirim biçimin?",
-    "Kaçınmayı tercih ettiğin toplantı?",
-    "Öğrenmek istediğin konu?",
+    {
+      question: `${facts.targetRole || "Hedef rol"} bağlamında kalite sinyalini nasıl ayırırsın?`,
+      whyThisQuestionFits: "Onaylı hedef role bağlı.",
+    },
+    {
+      question: "Bir otomasyon kararında neyi bilerek yapmazsın?",
+      whyThisQuestionFits: "Kalite/otomasyon trade-off’unu yoklar.",
+    },
+    {
+      question: "Danışmanlık ile ürün ekibi temposu sende nasıl ayrışır?",
+      whyThisQuestionFits: "Kariyer bağlamı sorusu; cevap uydurulmaz.",
+    },
+    {
+      question: "Bir metrik eksikse önce hangi kanıta bakarsın?",
+      whyThisQuestionFits: "Eksik ölçümü açıkça yoklar.",
+    },
+    {
+      question: "Sahiplik belirsizken ilk netleştirdiğin şey nedir?",
+      whyThisQuestionFits: "Sahiplik ve koordinasyon dinler.",
+    },
   ];
-  while (questions.length < 5) questions.push(rapidDefaults[questions.length]!);
-  questions = questions.slice(0, 5);
-  let alternatives = asStringArray(rapid.alternatives);
-  while (alternatives.length < 2) {
-    alternatives.push(alternatives.length === 0 ? "Son öğrendiğin küçük ipucu?" : "İyi ekip özelliği?");
-  }
-  alternatives = alternatives.slice(0, 2);
+  while (rapid.length < 5) rapid.push(rapidDefaults[rapid.length]!);
+  rapid = rapid.slice(0, 8).map((item) => {
+    const row = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+    return {
+      question: asString(row.question, "Kısa, adaya özgü bir soru"),
+      whyThisQuestionFits: asString(row.whyThisQuestionFits, "Aday bağlamına bağlı"),
+    };
+  });
 
-  let timing = Array.isArray(host.timingAndTransitions) ? host.timingAndTransitions : [];
-  if (timing.length < EDITORIAL_TIMELINE.length) {
-    timing = EDITORIAL_TIMELINE.map((s) => ({
-      ...s,
-      hostNote: "Geçişleri yumuşak tut; puanlama yok.",
-    }));
+  const knownPrefs = asStringArray(job.knownPreferences);
+  if (facts.workPreferences?.trim() && !knownPrefs.length) {
+    knownPrefs.push(`Onaylı çalışma tercihi: ${facts.workPreferences}`);
   }
+
+  const preparation: ArayanlarPreparation = {
+    identityPrep: {
+      profileSignals: signals,
+      careerThemes: themes,
+      careerTransitions: asStringArray(identity.careerTransitions).slice(0, 8),
+      confirmedFacts: (() => {
+        const c = asStringArray(identity.confirmedFacts);
+        if (c.length) return c.slice(0, 12);
+        return [
+          facts.displayName ? `Görünen ad onaylı: ${facts.displayName}` : "Ad belirsiz",
+          facts.targetRole ? `Hedef rol onaylı: ${facts.targetRole}` : "Hedef rol belirsiz",
+        ].filter(Boolean);
+      })(),
+      missingInformation: asStringArray(identity.missingInformation).slice(0, 12),
+      guestPrepQuestions: (() => {
+        const q = asStringArray(identity.guestPrepQuestions);
+        return q.length
+          ? q.slice(0, 8)
+          : ["Profesyonel kimliğini hangi 2 somut örnekle anlatırsın?"];
+      })(),
+      hostQuestions: (() => {
+        const q = asStringArray(identity.hostQuestions);
+        return q.length ? q.slice(0, 8) : ["Bugün kendini hangi rolle tanımlıyorsun ve neden?"];
+      })(),
+    },
+    storyCandidates: stories,
+    thinkingScenario: {
+      scenario: asString(
+        thinking.scenario,
+        "Ürün alanında tekrarlayan kalite regresyonları artıyor; kök neden belirsiz, sprint baskısı var.",
+      ),
+      whyItFitsThisCandidate: asString(
+        thinking.whyItFitsThisCandidate,
+        facts.targetRole
+          ? `${facts.targetRole} yönüne uygun bir kalite/öncelik belirsizliği.`
+          : "Kalite ve öncelik belirsizliği senaryosu.",
+      ),
+      whatTheHostShouldListenFor: (() => {
+        const w = asStringArray(thinking.whatTheHostShouldListenFor);
+        return w.length >= 2
+          ? w.slice(0, 10)
+          : ["Netleştirme soruları soruyor mu", "Semptom ile nedeni ayırıyor mu"];
+      })(),
+      constraints: (() => {
+        const c = asStringArray(thinking.constraints);
+        return c.length ? c.slice(0, 8) : ["Sınırlı zaman", "Eksik metrik"];
+      })(),
+    },
+    jobSearchPrep: {
+      knownPreferences: knownPrefs.slice(0, 12),
+      inferredButUnconfirmed: asStringArray(job.inferredButUnconfirmed).slice(0, 12),
+      missingInformation: (() => {
+        const m = asStringArray(job.missingInformation);
+        return m.length
+          ? m.slice(0, 12)
+          : ["Hedef unvan netliği", "Remote/hybrid tercihi", "People-management isteği"];
+      })(),
+      guestPrepQuestions: (() => {
+        const q = asStringArray(job.guestPrepQuestions);
+        return q.length ? q.slice(0, 8) : ["Aradığın ekip tipini somut olarak nasıl tanımlarsın?"];
+      })(),
+      hostQuestions: (() => {
+        const q = asStringArray(job.hostQuestions);
+        return q.length ? q.slice(0, 8) : ["Ne arıyorsun — rol mü, problem alanı mı, tempo mu?"];
+      })(),
+    },
+    rapidFire: rapid,
+    closingPrep: {
+      fixedQuestion: FIXED_CLOSING_QUESTION,
+      guestReflectionPrompts: (() => {
+        const p = asStringArray(closing.guestReflectionPrompts);
+        return p.length >= 2
+          ? p.slice(0, 4)
+          : [
+              "Seni ayıran somut bir çalışma biçimini tek cümlede düşün.",
+              "Dinleyen bir hiring manager’a hangi kanıtı bırakmak istersin?",
+            ];
+      })(),
+    },
+    overallMissingInformation: asStringArray(prepRaw.overallMissingInformation).slice(0, 20),
+  };
 
   return {
-    guestBrief: {
-      recordingWhatToExpect: asString(
-        guest.recordingWhatToExpect,
-        "Yaklaşık 18 dakikalık, tek konuklu sohbet temposunda bir kayıt.",
-      ),
-      selectedStoryTopic: asString(guest.selectedStoryTopic, facts.storyTopic || "Belirtilmedi"),
-      preparationGuidance: (() => {
-        const g = asStringArray(guest.preparationGuidance);
-        return g.length ? g.slice(0, 8) : ["Kendi cümlelerinle, kısa ve dürüst anlat."];
-      })(),
-      confirmedTargetRole: asString(guest.confirmedTargetRole, facts.targetRole || "Belirtilmedi"),
-      contactPreferences: asString(guest.contactPreferences, facts.contactChannel || "Belirtilmedi"),
-      recordingChecklist: (() => {
-        const c = asStringArray(guest.recordingChecklist);
-        return c.length ? c.slice(0, 12) : ["Sakin ortam", "Stabil bağlantı"];
-      })(),
-      coldOpenNote: asString(
-        guest.coldOpenNote,
-        "Kayıt gününde seçilecek gerçek bir ana dair not; uydurma alıntı yok.",
-      ),
-      timelineOverview: asString(
-        guest.timelineOverview,
-        EDITORIAL_TIMELINE.map((s) => `${s.start}–${s.end} ${s.label}`).join(" · "),
-      ),
-      disclaimer: asString(
-        guest.disclaimer,
-        "Bu başvuru davet veya kesin kayıt tarihi değildir; tarih, seçim veya işe alım garantisi yoktur.",
-      ),
-    },
-    hostPack: {
-      factualIntroduction: {
-        text: asString(
-          intro.text,
-          `${facts.displayName}; hedef: ${facts.targetRole || "belirsiz"}.`,
-        ),
-        sourceLabels: asStringArray(intro.sourceLabels).length
-          ? asStringArray(intro.sourceLabels)
-          : ["member_confirmed"],
-        uncertaintyLabels: asStringArray(intro.uncertaintyLabels),
-      },
-      mainQuestions,
-      case: {
-        title: asString(caseObj.title, "Rol-uyumlu kısa senaryo"),
-        setup: asString(caseObj.setup, "Belirsiz bir öncelik çatışması."),
-        supportingFacts,
-        newFact: asString(caseObj.newFact, "Beklenmedik bir kısıt ekleniyor."),
-      },
-      rapidRound: { questions, alternatives },
-      timingAndTransitions: timing,
-      unresolvedDetails: asStringArray(host.unresolvedDetails),
-      excludedTopics: asStringArray(host.excludedTopics).length
-        ? asStringArray(host.excludedTopics)
-        : facts.excludedTopics
-          ? facts.excludedTopics.split(/[,;]/).map((s) => s.trim()).filter(Boolean)
-          : [],
-      approvedContactChannel: asString(
-        host.approvedContactChannel,
-        facts.contactChannel || "Belirtilmedi",
-      ),
-      coldOpenProductionNote: asString(
-        host.coldOpenProductionNote,
-        "Kayıt öncesi gerçek bir andan kısa soğuk açılış seç; alıntı uydurma.",
-      ),
-      editorialNotes: asStringArray(host.editorialNotes).length
-        ? asStringArray(host.editorialNotes)
-        : ["Tek konuk, tek hikâye, tek vaka."],
-    },
+    schemaVersion: PREPARATION_SCHEMA_VERSION,
+    preparation,
   };
 }
 
 function stubOutput(facts: SubmittedFacts): ArayanlarPrepareOutput {
-  const guestBrief: GuestBrief = {
-    recordingWhatToExpect:
-      "Yaklaşık 18 dakikalık, tek konuklu, sohbet temposunda bir kayıt. Mülakat performansı ölçülmez.",
-    selectedStoryTopic: facts.storyTopic || "Üye henüz net bir hikâye seçmedi",
-    preparationGuidance: [
-      "Kendi cümlelerinle, kısa ve dürüst anlat.",
-      "Ezberlenecek ideal cevap üretme; bilmediğin detayı uydurma.",
-      "Sunucunun soracağı vaka içeriğini önceden ezberlemen beklenmez.",
-    ],
-    confirmedTargetRole: facts.targetRole || "Belirtilmedi",
-    contactPreferences: facts.contactChannel || "Belirtilmedi",
-    recordingChecklist: [
-      "Sakin bir ortam ve stabil bağlantı",
-      "Hedef rolünü kendi dilinle hatırla",
-      "Seçtiğin gerçek deneyimin ana noktaları",
-      "Konuşulmasını istemediğin sınırlar",
-    ],
-    coldOpenNote:
-      "Kayıt gününde seçilecek gerçek bir ana dair not tutulacak; önceden uydurma alıntı yok.",
-    timelineOverview: EDITORIAL_TIMELINE.map((s) => `${s.start}–${s.end} ${s.label}`).join(" · "),
-    disclaimer:
-      "[YEREL DEMO STUB — canlı AI değil] Bu başvuru davet veya kesin kayıt tarihi değildir; tarih, seçim veya işe alım garantisi yoktur.",
-  };
-
-  const hostPack: HostPack = {
-    factualIntroduction: {
-      text: `${facts.displayName}; hedef: ${facts.targetRole || "belirsiz"}. Hikâye: ${facts.storyTopic || "belirsiz"}.`,
-      sourceLabels: ["member_confirmed"],
-      uncertaintyLabels: facts.targetRole ? [] : ["targetRole unresolved"],
-    },
-    mainQuestions: [
-      {
-        question: "Hedef rolünü kendi sözlerinle nasıl tanımlarsın?",
-        followUps: ["Bu rolde en çok neyi merak ediyorsun?"],
-      },
-      {
-        question: "Anlattığın deneyimde asıl zorluk neydi?",
-        followUps: ["Senin somut katkın ne oldu?"],
-      },
-      {
-        question: "İstediğin çalışma ortamı nasıl görünüyor?",
-        followUps: [],
-      },
-    ],
-    case: {
-      title: "Rol-uyumlu kısa senaryo (demo stub)",
-      setup: "Küçük bir ekipte belirsiz bir öncelik çatışması var.",
-      supportingFacts: [
-        facts.storyTopic || "Üye hikâyesi belirsiz",
-        facts.contribution || "Katkı belirsiz",
+  const preparation: ArayanlarPreparation = {
+    identityPrep: {
+      profileSignals: [
+        facts.targetRole
+          ? `Onaylı hedef yön: ${facts.targetRole}`
+          : "Hedef rol başvuru metninde net değil",
+        facts.storyTopic
+          ? `Onaylı deneyim odağı mevcut`
+          : "Hikâye konusu başvuru metninde net değil",
+        facts.contribution
+          ? `Onaylı katkı ifadesi mevcut`
+          : "Katkı ifadesi başvuru metninde net değil",
       ],
-      newFact: "Paydaşlardan biri beklenmedik bir kısıt ekliyor.",
-    },
-    rapidRound: {
-      questions: [
-        "Sabah ilk baktığın araç?",
-        "Bir cümlelik çalışma temposu?",
-        "En sevdiğin geri bildirim biçimi?",
-        "Kaçınmayı tercih ettiğin toplantı türü?",
-        "Öğrenmek istediğin bir konu?",
+      careerThemes: ["[STUB] Tema çıkarımı sınırlı — canlı model CV kanıtı kullanır"],
+      careerTransitions: [],
+      confirmedFacts: [
+        `Görünen ad: ${facts.displayName}`,
+        facts.workPreferences
+          ? `Onaylı çalışma tercihi: ${facts.workPreferences}`
+          : "Çalışma tercihi boş",
       ],
-      alternatives: ["En son öğrendiğin küçük ipucu?", "Birlikte iyi çalıştığın ekip özelliği?"],
+      missingInformation: ["CV’den ölçülebilir sonuçlar stub’da işlenmez"],
+      guestPrepQuestions: [
+        "Kimliğini hangi iki somut deneyimle anlatırsın — sonuç iddiası uydurmadan?",
+      ],
+      hostQuestions: ["Bugün kendini hangi rolle tanımlıyorsun ve bunu neye dayandırıyorsun?"],
     },
-    timingAndTransitions: EDITORIAL_TIMELINE.map((s) => ({
-      ...s,
-      hostNote: "Geçişleri yumuşak tut; puanlama yok.",
-    })),
-    unresolvedDetails: [
-      !facts.targetRole ? "Hedef rol net değil" : "",
-      !facts.storyTopic ? "Hikâye konusu net değil" : "",
-    ].filter(Boolean),
-    excludedTopics: facts.excludedTopics
-      ? facts.excludedTopics.split(/[,;]/).map((s) => s.trim()).filter(Boolean)
-      : [],
-    approvedContactChannel: facts.contactChannel || "Belirtilmedi",
-    coldOpenProductionNote:
-      "Kayıt öncesi gerçek bir andan kısa soğuk açılış seç; alıntı uydurma.",
-    editorialNotes: [
-      "Tek konuk, tek hikâye, tek vaka.",
-      "Konuğa vaka detayını önceden ezberletme.",
+    storyCandidates: [
+      {
+        title: facts.storyTopic || "Onaylı deneyim",
+        sourceExperience: facts.storyTopic || "submitted_facts.storyTopic",
+        whyThisCouldBeAStory:
+          "Üyenin onayladığı konu; belirsizlik/trade-off potansiyeli sorulabilir.",
+        knownFacts: [facts.storyTopic || "Konu belirsiz", facts.contribution || "Katkı belirsiz"],
+        missingDetails: ["Ölçülebilir sonuç belirtilmemiş olabilir"],
+        guestPrepQuestions: ["Bu deneyimde somut olarak ne değişti?"],
+        hostQuestions: ["Asıl zorluk neydi?"],
+        followUpQuestions: ["Senin kararın neydi?"],
+        sourceReferences: ["submitted_facts.storyTopic"],
+      },
+    ],
+    thinkingScenario: {
+      scenario:
+        "Bir domain’de regresyonlar artıyor; metrik eksik, sprint baskısı var. Nereden başlarsın?",
+      whyItFitsThisCandidate: facts.targetRole
+        ? `${facts.targetRole} yönüne uygun kalite belirsizliği.`
+        : "Kalite belirsizliği senaryosu.",
+      whatTheHostShouldListenFor: [
+        "Netleştirme soruları",
+        "Semptom/neden ayrımı",
+        "Risk önceliği",
+      ],
+      constraints: ["Eksik metrik", "Sınırlı süre"],
+    },
+    jobSearchPrep: {
+      knownPreferences: facts.workPreferences
+        ? [`Onaylı: ${facts.workPreferences}`]
+        : [],
+      inferredButUnconfirmed: [],
+      missingInformation: ["Hedef unvan", "Remote/hybrid", "People-management tercihi"],
+      guestPrepQuestions: ["Aradığın ekip tipini somut nasıl tanımlarsın?"],
+      hostQuestions: ["Ne arıyorsun — problem alanı mı, tempo mu?"],
+    },
+    rapidFire: [
+      {
+        question: "Kalite sinyalini gürültüden nasıl ayırırsın?",
+        whyThisQuestionFits: "Stub hızlı tur — aday bağlamına uyum için canlı model gerekir.",
+      },
+      {
+        question: "Otomasyonda bilerek yapmayacağın şey?",
+        whyThisQuestionFits: "Trade-off yoklar.",
+      },
+      {
+        question: "Sahiplik belirsizken ilk netleştirdiğin şey?",
+        whyThisQuestionFits: "Sahiplik dinler.",
+      },
+      {
+        question: "Metrik yoksa hangi kanıta bakarsın?",
+        whyThisQuestionFits: "Eksik ölçüm.",
+      },
+      {
+        question: "Koçluk ile hands-on işi nasıl dengelersin?",
+        whyThisQuestionFits: "Kapsam dengesi.",
+      },
+    ],
+    closingPrep: {
+      fixedQuestion: FIXED_CLOSING_QUESTION,
+      guestReflectionPrompts: [
+        "Seni ayıran somut çalışma biçimini tek cümlede düşün.",
+        "Dinleyene bırakmak istediğin kanıt nedir?",
+      ],
+    },
+    overallMissingInformation: [
       "[YEREL DEMO STUB — canlı AI değil]",
+      "CV kanıtı stub yolunda işlenmez",
     ],
   };
 
-  return { guestBrief, hostPack };
+  return { schemaVersion: PREPARATION_SCHEMA_VERSION, preparation };
 }
 
-export async function generateArayanlarPreparation(input: {
-  facts: SubmittedFacts;
-  editorialTemplateVersion: string;
-}): Promise<ArayanlarPrepareResult> {
+export async function generateArayanlarPreparation(
+  input: PrepareGroundingInput,
+): Promise<ArayanlarPrepareResult> {
   const { scrubSensitiveCvText } = await import("@/lib/legal/sensitive-filter");
   const scrubField = (value: string) => scrubSensitiveCvText(value).text;
-  const facts: SubmittedFacts = {
+  const facts = scrubFacts({
     ...input.facts,
     targetRole: scrubField(input.facts.targetRole ?? ""),
     storyTopic: scrubField(input.facts.storyTopic ?? ""),
@@ -295,7 +442,11 @@ export async function generateArayanlarPreparation(input: {
     memberNotes: input.facts.memberNotes
       ? scrubField(input.facts.memberNotes)
       : input.facts.memberNotes,
-  };
+  });
+
+  const cvText = input.cvText
+    ? scrubSensitiveCvText(input.cvText.slice(0, 50_000)).text
+    : "";
 
   const resolution = resolveProviderConfig();
 
@@ -328,25 +479,39 @@ export async function generateArayanlarPreparation(input: {
     };
   }
 
-  const model = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const model = resolveArayanlarPrepModel();
+  // Producer-notes + medium reasoning can exceed 2 minutes; fail before the lease window.
+  const OPENAI_TIMEOUT_MS = 8 * 60_000;
+  const client = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    timeout: OPENAI_TIMEOUT_MS,
+  });
 
   try {
     const response = await client.responses.create({
       model,
+      reasoning: { effort: ARAYANLAR_PREP_REASONING_EFFORT },
       input: [
         { role: "system", content: PREPARE_SYSTEM },
         {
           role: "user",
           content: JSON.stringify({
             editorialTemplateVersion: input.editorialTemplateVersion,
-            timeline: EDITORIAL_TIMELINE,
-            confirmedFacts: facts,
-            requirements: {
-              guestAndHostSeparate: true,
-              noFabricatedColdOpenQuote: true,
-              noInventedDatesOrGuarantees: true,
-              oneGuestOneStoryOneCase: true,
+            confirmedApplicationFacts: facts,
+            profileHints: input.profileHints ?? null,
+            cvExtractedText: cvText || null,
+            cvAvailable: Boolean(cvText),
+            productRules: {
+              producerResearchNotInterviewCoaching: true,
+              missingInformationIsSuccess: true,
+              hypotheticalOnlyInThinkingScenario: true,
+              noColdOpen: true,
+              noTimeline: true,
+              noEquipmentChecklist: true,
+              noInventedAchievements: true,
+              fixedClosingQuestion: FIXED_CLOSING_QUESTION,
+              specificityTest:
+                "If a note could apply to 100 similar professionals, rewrite with concrete candidate evidence.",
             },
           }),
         },
@@ -383,7 +548,7 @@ export async function generateArayanlarPreparation(input: {
       };
     }
 
-    const normalized = normalizeArayanlarOutput(parsed, input.facts);
+    const normalized = normalizeArayanlarOutput(parsed, facts);
     const validated = arayanlarPrepareOutputSchema.safeParse(normalized);
     if (!validated.success) {
       return {
@@ -403,12 +568,16 @@ export async function generateArayanlarPreparation(input: {
       labeledStub: false,
       output: validated.data,
     };
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const timedOut = /timeout|timed out|AbortError/i.test(message);
     return {
       ok: false,
       mode: "openai",
-      code: "provider_error",
-      message: "Sağlayıcı hatası. Önceki cevapların korundu; kredi serbest bırakılacak.",
+      code: timedOut ? "provider_timeout" : "provider_error",
+      message: timedOut
+        ? "Sağlayıcı zaman aşımına uğradı. Önceki cevapların korundu."
+        : "Sağlayıcı hatası. Önceki cevapların korundu; kredi serbest bırakılacak.",
     };
   }
 }

@@ -56,9 +56,12 @@ export default async function BasvurumPage() {
             <Link href="/arayanlar#basvuru" className="btn btn-secondary inline-flex">
               {facing === "DRAFT" || facing === "AWAITING_CONFIRMATION"
                 ? "Başvuruma devam et"
-                : facing === "QUEUED" || facing === "RUNNING" || facing === "SUBMITTED_ACCEPTED"
+                : facing === "QUEUED" ||
+                    facing === "RUNNING" ||
+                    facing === "SUBMITTED_ACCEPTED" ||
+                    facing === "READY"
                   ? "Hazırlık durumunu gör"
-                  : "Başvuruma dön"}
+                  : "Başvuruya git"}
             </Link>
           </div>
         </div>
