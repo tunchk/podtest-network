@@ -457,8 +457,8 @@ describe("m3.2 community Q&A / invitations / FAQs / episodes", () => {
     });
 
     const published = await listPublishedEpisodes();
-    expect(published.find((e) => e.id === draftEp.id)).toBeUndefined();
-    expect(published.find((e) => e.id === pubEp.id)).toBeTruthy();
+    expect(published.items.find((e) => e.id === draftEp.id)).toBeUndefined();
+    expect(published.items.find((e) => e.id === pubEp.id)).toBeTruthy();
 
     const appearance = await requestAppearance({
       memberUserId: expert,

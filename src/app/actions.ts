@@ -31,9 +31,17 @@ export async function registerAction(formData: FormData) {
   const name = formString(formData, "name");
   const email = formString(formData, "email").toLowerCase();
   const password = formString(formData, "password");
+  const acceptTerms = formChecked(formData, "acceptTerms");
+  const acceptPrivacy = formChecked(formData, "acceptPrivacy");
+  const acceptMarketing = formChecked(formData, "acceptMarketing");
 
   if (!name || !email || password.length < 8) {
     return { error: "Ad, e-posta ve en az 8 karakterli şifre gerekli." };
+  }
+  if (!acceptTerms || !acceptPrivacy) {
+    return {
+      error: "Kayıt için Kullanım Koşulları kabulü ve Aydınlatma Metni onayı zorunludur.",
+    };
   }
 
   try {
@@ -48,6 +56,28 @@ export async function registerAction(formData: FormData) {
         id: userId,
         name: result.user.name,
         email: result.user.email,
+      });
+    }
+
+    const { recordAcceptance } = await import("@/lib/legal/service");
+    await recordAcceptance({
+      userId,
+      type: "TERMS",
+      documentType: "TERMS_OF_SERVICE",
+      scope: "account_registration",
+    });
+    await recordAcceptance({
+      userId,
+      type: "PRIVACY_NOTICE",
+      documentType: "PRIVACY_NOTICE",
+      scope: "account_registration",
+    });
+    if (acceptMarketing) {
+      await recordAcceptance({
+        userId,
+        type: "MARKETING",
+        documentType: "MARKETING_CONSENT",
+        scope: "account_registration",
       });
     }
   } catch (error) {

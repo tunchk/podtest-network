@@ -191,6 +191,19 @@ export async function createMessageRequest(options: {
       },
     });
 
+    // Non-sensitive: do not include introduction text.
+    const { createNotification } = await import("@/lib/notifications/service");
+    await createNotification({
+      userId: options.recipientId,
+      kind: "message_request",
+      title: "Yeni mesaj isteği",
+      body: "Bir üye sana mesaj isteği gönderdi.",
+      href: "/mesajlar",
+      payload: { requestId: request.id },
+      dedupeKey: `message_request:${request.id}`,
+      tx,
+    });
+
     return { kind: "created" as const, request };
   });
 }

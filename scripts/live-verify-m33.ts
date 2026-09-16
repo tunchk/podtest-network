@@ -161,3 +161,6 @@ main()
     process.exit(1);
   })
   .finally(() => db.$disconnect());
+
+// Fixture emails from this script are registered in scripts/cleanup-verify-fixtures.ts
+// Prefer self-cleanup in finally; otherwise: npm run cleanup:fixtures

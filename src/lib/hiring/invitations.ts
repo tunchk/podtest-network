@@ -63,7 +63,7 @@ export async function acceptEmployerMembershipInvitation(options: {
 
   const tokenHash = hashOpaqueToken(options.token);
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const locked = await tx.$queryRaw<
       Array<{
         id: string;
@@ -74,9 +74,10 @@ export async function acceptEmployerMembershipInvitation(options: {
         revokedAt: Date | null;
         consumedAt: Date | null;
         consumedById: string | null;
+        createdById: string;
       }>
     >`
-      SELECT id, "workspaceId", "recipientEmail", role, "expiresAt", "revokedAt", "consumedAt", "consumedById"
+      SELECT id, "workspaceId", "recipientEmail", role, "expiresAt", "revokedAt", "consumedAt", "consumedById", "createdById"
       FROM employer_membership_invitation
       WHERE "tokenHash" = ${tokenHash}
       FOR UPDATE
@@ -120,6 +121,27 @@ export async function acceptEmployerMembershipInvitation(options: {
     });
 
     // Does not grant speaker/host/staff capabilities.
-    return { alreadyAccepted: false as const, workspaceId: inv.workspaceId, role: inv.role };
+    return {
+      alreadyAccepted: false as const,
+      workspaceId: inv.workspaceId,
+      role: inv.role,
+      invitationId: inv.id,
+      createdById: inv.createdById,
+    };
   });
+
+  if (!result.alreadyAccepted && "createdById" in result && result.createdById) {
+    const { createNotification } = await import("@/lib/notifications/service");
+    await createNotification({
+      userId: result.createdById,
+      kind: "employer_invitation_accepted",
+      title: "İşveren daveti kabul edildi",
+      body: "Bir üye işveren çalışma alanı davetini kabul etti.",
+      href: "/isveren",
+      payload: { workspaceId: result.workspaceId, invitationId: result.invitationId },
+      dedupeKey: `employer_invitation_accepted:${result.invitationId}`,
+    });
+  }
+
+  return result;
 }

@@ -20,8 +20,11 @@ export default async function AskQuestionPage() {
         </Link>
         <h1 className="mt-3 font-[family-name:var(--font-display)] text-3xl">{ui.community.askTitle}</h1>
         <p className="mt-2 text-sm text-[var(--muted)]">{ui.community.askLead}</p>
+        <p className="mt-3 rounded-md border border-[var(--line)] px-3 py-2 text-sm text-[var(--muted)]">
+          {ui.community.moderationNearAsk}
+        </p>
         <p className="mt-2 text-xs text-[var(--muted)]">
-          Günlük kota: {quota.used}/{quota.allowance} soru (anti-kötüye kullanım varsayılanı).
+          Günlük kota: {quota.used}/{quota.allowance} soru.
         </p>
       </div>
       <AskQuestionForm episodes={episodes} />

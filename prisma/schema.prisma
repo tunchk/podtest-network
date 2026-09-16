@@ -149,6 +149,7 @@ model User {
   expertFaqs              ExpertFaq[]            @relation("ExpertFaqOwner")
   expertFaqProposals      ExpertFaq[]            @relation("ExpertFaqProposer")
   podcastEpisodesCreated  PodcastEpisode[]       @relation("PodcastEpisodeCreator")
+  podcastFeedsUpdated     PodcastFeedConfig[]    @relation("PodcastFeedUpdater")
   episodeAppearances      EpisodeAppearance[]
   episodeAppearancesProposed EpisodeAppearance[] @relation("AppearanceProposer")
   targetedQuestionsSent   TargetedExpertQuestion[] @relation("TargetedQuestionAsker")
@@ -164,6 +165,7 @@ model User {
   hiringCandidateLists    HiringCandidateList[]
   hiringCandidateNotes    HiringCandidateNote[] @relation("HiringNoteAuthor")
   hiringNotesAbout        HiringCandidateNote[] @relation("HiringNoteSubject")
+  legalAcceptances        LegalAcceptance[]
 
   @@map("user")
 }
@@ -1050,10 +1052,31 @@ model PodcastEpisode {
   id               String                         @id @default(cuid())
   series           String
   title            String
+  /// Public URL slug (stable after first publish/import when possible).
+  slug             String                         @unique
   description      String?
+  /// Sanitized HTML description for detail page (strict allowlist). Plain text preferred for cards.
+  descriptionHtml  String?
   publicationDate  DateTime?
+  /// Canonical page / listening link from feed item <link> or admin (not necessarily Spotify).
   listeningUrl     String?
+  /// Validated open.spotify.com episode URL only — never invented from RSS.
+  spotifyEpisodeUrl String?
+  artworkUrl       String?
+  audioUrl         String?
+  durationSeconds  Int?
+  episodeNumber    Int?
+  seasonNumber     Int?
   publicationState PodcastEpisodePublicationState @default(DRAFT)
+  sourceKind       PodcastEpisodeSourceKind       @default(MANUAL)
+  feedConfigId     String?
+  feedConfig       PodcastFeedConfig?             @relation(fields: [feedConfigId], references: [id], onDelete: SetNull)
+  /// Stable RSS item identity within feed (GUID or enclosure-URL fallback).
+  rssGuid          String?
+  /// Last imported field snapshot (JSON) for refresh diffs.
+  importedSnapshot Json?
+  /// Map of field names curated by admin that RSS refresh must not overwrite.
+  manualOverrides  Json?
   createdById      String
   createdBy        User                           @relation("PodcastEpisodeCreator", fields: [createdById], references: [id], onDelete: Restrict)
   createdAt        DateTime                       @default(now())
@@ -1063,9 +1086,38 @@ model PodcastEpisode {
   invitations  SpeakerInvitation[]
   questions    CommunityQuestion[]
 
+  @@unique([feedConfigId, rssGuid])
   @@index([publicationState, publicationDate])
   @@index([series])
+  @@index([audioUrl])
+  @@index([listeningUrl])
   @@map("podcast_episode")
+}
+
+enum PodcastEpisodeSourceKind {
+  MANUAL
+  RSS
+}
+
+model PodcastFeedConfig {
+  id              String    @id @default(cuid())
+  /// Admin-configured HTTPS feed URL.
+  feedUrl         String
+  /// Stable feed identity (prefer atom:link rel=self).
+  feedIdentity    String?   @unique
+  feedTitle       String?
+  lastFetchedAt   DateTime?
+  lastFetchStatus String?
+  lastFetchError  String?
+  lastItemCount   Int?
+  updatedById     String?
+  updatedBy       User?     @relation("PodcastFeedUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  episodes PodcastEpisode[]
+
+  @@map("podcast_feed_config")
 }
 
 model EpisodeAppearance {
@@ -1120,9 +1172,12 @@ model InAppNotification {
   body      String?
   href      String?
   payload   Json?
+  /// Event-level idempotency key; null rows are legacy and not deduped.
+  dedupeKey String?
   readAt    DateTime?
   createdAt DateTime @default(now())
 
+  @@unique([userId, dedupeKey])
   @@index([userId, readAt, createdAt])
   @@map("in_app_notification")
 }
@@ -1356,4 +1411,77 @@ model HiringCandidateNote {
   @@index([workspaceId, subjectUserId])
   @@index([authorId, createdAt])
   @@map("hiring_candidate_note")
+}
+
+// ---------------------------------------------------------------------------
+// Legal & Privacy Foundation — versioned documents and acceptances
+// ---------------------------------------------------------------------------
+
+enum LegalDocumentType {
+  TERMS_OF_SERVICE
+  PRIVACY_NOTICE
+  CV_AI_PROCESSING_NOTICE
+  CV_AI_CONSENT
+  PROFILE_VISIBILITY_NOTICE
+  HOST_PREP_SHARING_NOTICE
+  RECORDING_CONSENT
+  PUBLICATION_APPROVAL
+  MARKETING_CONSENT
+  RECORDING_AND_PUBLICATION_NOTICE
+}
+
+enum LegalAcceptanceType {
+  TERMS
+  PRIVACY_NOTICE
+  CV_AI_PROCESSING
+  CV_AI_CONSENT
+  PROFILE_VISIBILITY
+  HOST_PREP_SHARING
+  RECORDING
+  PUBLICATION
+  MARKETING
+}
+
+model LegalDocument {
+  id                   String            @id @default(cuid())
+  type                 LegalDocumentType
+  version              String
+  locale               String            @default("tr")
+  title                String
+  summary              String?
+  /// Full draft body (markdown). Final counsel review required before production publication.
+  bodyMarkdown         String
+  effectiveFrom        DateTime          @default(now())
+  retiredAt            DateTime?
+  /// When true, users with an older acceptance must re-accept before gated actions.
+  requiresReacceptance Boolean           @default(true)
+  createdAt            DateTime          @default(now())
+
+  @@unique([type, version, locale])
+  @@index([type, locale, effectiveFrom])
+  @@map("legal_document")
+}
+
+model LegalAcceptance {
+  id                   String               @id @default(cuid())
+  userId               String
+  user                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type                 LegalAcceptanceType
+  documentType         LegalDocumentType
+  documentVersion      String
+  /// Stable key: `{documentType}:{version}:{locale}`
+  documentKey          String
+  scope                String?
+  relatedResourceType  String?
+  relatedResourceId    String?
+  acceptedAt           DateTime             @default(now())
+  withdrawnAt          DateTime?
+  /// Optional non-sensitive metadata (e.g. publicationVersionId). No secrets.
+  metadata             Json?
+
+  @@index([userId, type, withdrawnAt])
+  @@index([userId, documentKey])
+  @@index([relatedResourceType, relatedResourceId])
+  @@index([type, documentVersion])
+  @@map("legal_acceptance")
 }

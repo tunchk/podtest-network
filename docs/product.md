@@ -27,6 +27,7 @@ PodTest Network is an open community. Anyone can join. Membership does not requi
 ## Milestone 2.2 behavior
 
 - Optional Arayanlar preparation with guest brief / assigned-host pack separation.
+- Optional explicit reuse of an existing private CV to seed editable Arayanlar fact proposals (no extra AI charge; CV not required).
 
 ## Milestone 3.1 behavior
 
@@ -54,8 +55,13 @@ PodTest Network is an open community. Anyone can join. Membership does not requi
 - PodTest+ / Employer billing, credit sales, subscriptions (checkout deferred)
 - Live Catchylabs provisioning
 - Webinars / video conferencing
-- Spotify account integration, audio hosting, automatic episode imports
+- Spotify account OAuth / automatic episode sync beyond admin RSS import
 - Booking/checkout for expert consultation
+
+## Podcast RSS (admin catalog)
+
+- Admins can preview/import/refresh an HTTPS podcast RSS feed into the existing episode catalog.
+- See `docs/episodes.md`. Public listening does not require an account.
 
 ## Public field allowlist
 

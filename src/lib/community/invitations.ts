@@ -134,7 +134,7 @@ export async function acceptSpeakerInvitation(options: {
 
   const tokenHash = hashOpaqueToken(options.token);
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     // Serialize on the invitation row.
     const locked = await tx.$queryRaw<
       Array<{
@@ -228,4 +228,27 @@ export async function acceptSpeakerInvitation(options: {
 
     return { alreadyAccepted: false as const, invitationId: inv.id, purpose: inv.purpose };
   });
+
+  // After successful first accept — notify invitation creator (admin).
+  // Decline-by-invitee has no hook in this flow.
+  if (!result.alreadyAccepted) {
+    const { createNotification } = await import("@/lib/notifications/service");
+    const invRow = await prisma.speakerInvitation.findUnique({
+      where: { id: result.invitationId },
+      select: { createdById: true },
+    });
+    if (invRow?.createdById) {
+      await createNotification({
+        userId: invRow.createdById,
+        kind: "speaker_invitation_accepted",
+        title: "Konuşmacı daveti kabul edildi",
+        body: "Bir konuşmacı daveti kabul edildi.",
+        href: "/yonetim",
+        payload: { invitationId: result.invitationId, purpose: result.purpose },
+        dedupeKey: `speaker_invitation_accepted:${result.invitationId}`,
+      });
+    }
+  }
+
+  return result;
 }

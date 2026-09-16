@@ -57,3 +57,7 @@ skills-lock.json
 
 /src/generated/prisma
 /PodTest_Network_Cursor_Build_Brief.md
+/tuncV.pdf
+
+# Local verification artifacts
+tmp/

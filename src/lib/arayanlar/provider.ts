@@ -30,7 +30,8 @@ Kurallar:
 - JSON şemasına sıkı uy.
 - hostPack.mainQuestions en az 3 soru içermeli (her birinde followUps dizisi).
 - hostPack.case.supportingFacts tam 2 madde; rapidRound.questions tam 5; alternatives tam 2.
-- timingAndTransitions editorial timeline segmentlerini kapsamalı.`;
+- timingAndTransitions editorial timeline segmentlerini kapsamalı.
+- Hassas / özel nitelikli veya konu dışı kişisel verileri (sağlık, siyasi görüş, din, sendika, ailevi mahremiyet vb.) hazırlık çıktısına KOYMA. Yalnızca mesleki bilgiler kullan; uydurma veya çıkarım yapma.`;
 
 function asString(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -281,6 +282,21 @@ export async function generateArayanlarPreparation(input: {
   facts: SubmittedFacts;
   editorialTemplateVersion: string;
 }): Promise<ArayanlarPrepareResult> {
+  const { scrubSensitiveCvText } = await import("@/lib/legal/sensitive-filter");
+  const scrubField = (value: string) => scrubSensitiveCvText(value).text;
+  const facts: SubmittedFacts = {
+    ...input.facts,
+    targetRole: scrubField(input.facts.targetRole ?? ""),
+    storyTopic: scrubField(input.facts.storyTopic ?? ""),
+    contribution: scrubField(input.facts.contribution ?? ""),
+    workPreferences: scrubField(input.facts.workPreferences ?? ""),
+    excludedTopics: scrubField(input.facts.excludedTopics ?? ""),
+    contactChannel: scrubField(input.facts.contactChannel ?? ""),
+    memberNotes: input.facts.memberNotes
+      ? scrubField(input.facts.memberNotes)
+      : input.facts.memberNotes,
+  };
+
   const resolution = resolveProviderConfig();
 
   if (resolution.mode === "unavailable") {
@@ -308,7 +324,7 @@ export async function generateArayanlarPreparation(input: {
       ok: true,
       mode: "stub",
       labeledStub: true,
-      output: stubOutput(input.facts),
+      output: stubOutput(facts),
     };
   }
 
@@ -325,7 +341,7 @@ export async function generateArayanlarPreparation(input: {
           content: JSON.stringify({
             editorialTemplateVersion: input.editorialTemplateVersion,
             timeline: EDITORIAL_TIMELINE,
-            confirmedFacts: input.facts,
+            confirmedFacts: facts,
             requirements: {
               guestAndHostSeparate: true,
               noFabricatedColdOpenQuote: true,

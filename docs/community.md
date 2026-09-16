@@ -57,8 +57,9 @@ Daily quotas use `pg_advisory_xact_lock` for concurrency-safe enforcement and id
 
 ## Podcast episodes and appearances
 
-- Admin-managed catalog: series, title, description, publication date, canonical listening URL, publication state (`DRAFT` / `PUBLISHED` / `REMOVED`).
-- Public `/bolumler` and selectors only show `PUBLISHED` episodes. Draft/removed must not leak.
+- Admin-managed catalog: series, title, description, publication date, listening URL, optional Spotify episode URL, artwork, audio enclosure URL, publication state (`DRAFT` / `PUBLISHED` / `REMOVED`).
+- Admin RSS import/refresh into the **same** catalog (`docs/episodes.md`). No parallel catalog.
+- Public `/bolumler` and `/bolumler/[slug]` only show `PUBLISHED` episodes. Draft/removed must not leak.
 - Member requests association → admin verifies. Admin may propose → member accepts. Members cannot self-verify by editing payloads.
 - Only confirmed associations on published episodes appear on public profiles when the member opts in (`showAppearancesOnProfile`) and the profile is published.
 - Questions may optionally link to a published episode.

@@ -20,6 +20,7 @@ import {
   seedAnswersFromProfile,
   type QuestionKey,
 } from "@/lib/arayanlar/conversation";
+import { proposeArayanlarFactsFromOwnedCv } from "@/lib/arayanlar/cv-proposals";
 import { guestBriefSchema, hostPackSchema, type HostPack } from "@/lib/arayanlar/artifact-schema";
 import { canHostAccessApplication, isAuthorizedHost } from "@/lib/arayanlar/host-auth";
 import {
@@ -248,11 +249,69 @@ export async function switchToSummaryFallback(userId: string, answersPatch: Draf
   });
 }
 
+/**
+ * Explicit opt-in: fill editable Arayanlar proposals from an owned private CV.
+ * No AI credit charge. Raw CV text is never stored on the application or artifacts.
+ * Cost confirmation is ensured here so the entry works without a prior "Tanışmaya başla".
+ */
+export async function applyOwnedCvProposalsToApplication(
+  userId: string,
+  cvDocumentId: string,
+) {
+  await confirmCostAndStart(userId);
+  const app = await prisma.arayanlarApplication.findUnique({ where: { userId } });
+  if (!app) throw new Error("NOT_FOUND");
+  if (app.status === "WITHDRAWN" || app.status === "SUBMITTED") {
+    throw new Error("INVALID_STATE");
+  }
+
+  const proposal = await proposeArayanlarFactsFromOwnedCv(userId, cvDocumentId);
+  const prior = asDraftAnswers(app.draftAnswers);
+  const merged: DraftAnswers = {
+    ...prior,
+    ...proposal.answers,
+    // Keep member-entered contact/exclusions if already set.
+    excludedTopics: prior.excludedTopics?.trim()
+      ? prior.excludedTopics
+      : proposal.answers.excludedTopics,
+    contactChannel: prior.contactChannel?.trim()
+      ? prior.contactChannel
+      : proposal.answers.contactChannel,
+    sourceHints: [
+      ...new Set([...(prior.sourceHints ?? []), ...proposal.hints]),
+    ],
+  };
+
+  const turns = [
+    ...asTurns(app.conversationTurns),
+    {
+      role: "assistant" as const,
+      content:
+        "Mevcut CV’nden düzenlenebilir öneriler dolduruldu. Onaylamadan önce kontrol et; ham CV metni sunucuya veya konuk brifine eklenmez.",
+      at: new Date().toISOString(),
+    },
+  ];
+
+  const updated = await prisma.arayanlarApplication.update({
+    where: { id: app.id },
+    data: {
+      useSummaryFallback: true,
+      status: "AWAITING_CONFIRMATION",
+      draftAnswers: merged as Prisma.InputJsonValue,
+      conversationTurns: turns as unknown as Prisma.InputJsonValue,
+      confirmedCostAt: app.confirmedCostAt ?? new Date(),
+    },
+  });
+
+  return { application: updated, proposal };
+}
+
 export function buildFactsPreview(options: {
   displayName: string;
   answers: DraftAnswers;
   profileHints: string[];
 }): SubmittedFacts {
+  const sourceHints = options.answers.sourceHints ?? [];
   return {
     displayName: options.displayName,
     targetRole: options.answers.targetRole?.trim() || "",
@@ -261,7 +320,7 @@ export function buildFactsPreview(options: {
     workPreferences: options.answers.workPreferences?.trim() || "",
     excludedTopics: options.answers.excludedTopics?.trim() || "",
     contactChannel: options.answers.contactChannel?.trim() || "",
-    profileHintsUsed: options.profileHints,
+    profileHintsUsed: [...new Set([...options.profileHints, ...sourceHints])],
     memberNotes: options.answers.extraNotes?.trim() || undefined,
   };
 }
@@ -280,6 +339,10 @@ export async function submitApplication(options: {
   if (app.status === "SUBMITTED" && (app.prepStatus === "QUEUED" || app.prepStatus === "RUNNING" || app.prepStatus === "READY")) {
     throw new Error("ALREADY_SUBMITTED");
   }
+
+  // Host prep is derived from submission; require explicit host-prep sharing notice.
+  const { requireHostPrepSharingGate } = await import("@/lib/legal/service");
+  await requireHostPrepSharingGate(options.userId, app.id);
 
   if (!app.confirmedCostAt) {
     await ensureSponsoredArayanlarPrepareGrant(options.userId);

@@ -160,6 +160,11 @@ function countActivePublishedJobsWhere(workspaceId: string): Prisma.JobListingWh
   };
 }
 
+/** Active published (non-expired) jobs for pilot slot messaging in employer UI. */
+export async function countActivePublishedJobs(workspaceId: string) {
+  return prisma.jobListing.count({ where: countActivePublishedJobsWhere(workspaceId) });
+}
+
 export async function submitJobForPublication(options: {
   userId: string;
   workspaceId: string;
@@ -169,7 +174,7 @@ export async function submitJobForPublication(options: {
   if (!cap.allowed) fail("CAPABILITY_DENIED");
   await requireWorkspaceMember({ userId: options.userId, workspaceId: options.workspaceId });
 
-  return prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     const job = await tx.jobListing.findUnique({ where: { id: options.jobId } });
     if (!job || job.workspaceId !== options.workspaceId) fail("NOT_FOUND");
     if (job.status === "PENDING_REVIEW") fail("ALREADY_PENDING");
@@ -231,16 +236,21 @@ export async function submitJobForPublication(options: {
     });
 
     if (classification.outcome === "reject") {
-      return tx.jobListing.update({
-        where: { id: job.id },
-        data: {
-          currentRevision: nextRev,
-          status: job.publishedRevision != null ? "PUBLISHED" : "REJECTED",
-          moderationReason: classification.safeMessage,
-          moderationAdapter: HIRING_MODERATION_ADAPTER,
-          moderationPolicyVersion: HIRING_MODERATION_POLICY_VERSION,
-        },
-      });
+      return {
+        job: await tx.jobListing.update({
+          where: { id: job.id },
+          data: {
+            currentRevision: nextRev,
+            status: job.publishedRevision != null ? "PUBLISHED" : "REJECTED",
+            moderationReason: classification.safeMessage,
+            moderationAdapter: HIRING_MODERATION_ADAPTER,
+            moderationPolicyVersion: HIRING_MODERATION_POLICY_VERSION,
+          },
+        }),
+        outcome: "rejected" as const,
+        revision: nextRev,
+        wasAlreadyPublished: job.publishedRevision != null,
+      };
     }
 
     if (classification.outcome === "hold" || classification.outcome === "unavailable") {
@@ -253,31 +263,94 @@ export async function submitJobForPublication(options: {
           idempotencyKey: `job:${job.id}:r${nextRev}`,
         },
       });
-      return tx.jobListing.update({
+      return {
+        job: await tx.jobListing.update({
+          where: { id: job.id },
+          data: {
+            currentRevision: nextRev,
+            status: job.publishedRevision != null ? "PUBLISHED" : "PENDING_REVIEW",
+            moderationReason: classification.safeMessage,
+            moderationAdapter: HIRING_MODERATION_ADAPTER,
+            moderationPolicyVersion: HIRING_MODERATION_POLICY_VERSION,
+          },
+        }),
+        outcome: "held" as const,
+        revision: nextRev,
+        wasAlreadyPublished: job.publishedRevision != null,
+      };
+    }
+
+    return {
+      job: await tx.jobListing.update({
         where: { id: job.id },
         data: {
           currentRevision: nextRev,
-          status: job.publishedRevision != null ? "PUBLISHED" : "PENDING_REVIEW",
-          moderationReason: classification.safeMessage,
+          publishedRevision: nextRev,
+          status: "PUBLISHED",
+          publishedAt: job.publishedAt ?? new Date(),
+          moderationReason: null,
           moderationAdapter: HIRING_MODERATION_ADAPTER,
           moderationPolicyVersion: HIRING_MODERATION_POLICY_VERSION,
         },
-      });
-    }
+      }),
+      outcome: "published" as const,
+      revision: nextRev,
+      wasAlreadyPublished: job.publishedRevision != null,
+    };
+  });
 
-    return tx.jobListing.update({
-      where: { id: job.id },
-      data: {
-        currentRevision: nextRev,
-        publishedRevision: nextRev,
-        status: "PUBLISHED",
-        publishedAt: job.publishedAt ?? new Date(),
-        moderationReason: null,
-        moderationAdapter: HIRING_MODERATION_ADAPTER,
-        moderationPolicyVersion: HIRING_MODERATION_POLICY_VERSION,
+  // Notify on clear outcomes. For already-published jobs kept live under reject/hold,
+  // still inform members about the revision outcome.
+  const { notifyWorkspaceMembers } = await import("@/lib/notifications/service");
+  if (updated.outcome === "published") {
+    await notifyWorkspaceMembers({
+      workspaceId: updated.job.workspaceId,
+      kind: "job_listing_published",
+      title: "İş ilanı yayımlandı",
+      body: "İş ilanın yayın incelemesinden geçti ve yayımlandı.",
+      href: "/isveren/ilanlar",
+      dedupeKeyPrefix: `job_listing:${updated.job.id}:r${updated.revision}:published`,
+      payload: {
+        jobId: updated.job.id,
+        workspaceId: updated.job.workspaceId,
+        revision: updated.revision,
       },
     });
-  });
+  } else if (updated.outcome === "rejected") {
+    await notifyWorkspaceMembers({
+      workspaceId: updated.job.workspaceId,
+      kind: "job_listing_rejected",
+      title: "İş ilanı yayımı reddedildi",
+      body: updated.wasAlreadyPublished
+        ? "Yeni ilan revizyonu reddedildi. Önceki yayımlı sürüm duruyor."
+        : "İş ilanı yayım başvurun reddedildi.",
+      href: "/isveren/ilanlar",
+      dedupeKeyPrefix: `job_listing:${updated.job.id}:r${updated.revision}:rejected`,
+      payload: {
+        jobId: updated.job.id,
+        workspaceId: updated.job.workspaceId,
+        revision: updated.revision,
+      },
+    });
+  } else if (updated.outcome === "held") {
+    await notifyWorkspaceMembers({
+      workspaceId: updated.job.workspaceId,
+      kind: "job_listing_held",
+      title: "İş ilanı incelemede",
+      body: updated.wasAlreadyPublished
+        ? "Yeni ilan revizyonu manuel incelemeye alındı. Önceki yayımlı sürüm duruyor."
+        : "İş ilanın manuel incelemeye alındı.",
+      href: "/isveren/ilanlar",
+      dedupeKeyPrefix: `job_listing:${updated.job.id}:r${updated.revision}:held`,
+      payload: {
+        jobId: updated.job.id,
+        workspaceId: updated.job.workspaceId,
+        revision: updated.revision,
+      },
+    });
+  }
+
+  return updated.job;
 }
 
 export async function publishHeldJobRevision(options: { jobId: string; revision: number }) {
@@ -289,7 +362,7 @@ export async function publishHeldJobRevision(options: { jobId: string; revision:
   const job = await prisma.jobListing.findUnique({ where: { id: options.jobId } });
   if (!job) fail("NOT_FOUND");
 
-  return prisma.$transaction(async (tx) => {
+  const published = await prisma.$transaction(async (tx) => {
     if (job.publishedRevision == null) {
       await tx.$executeRaw`
         SELECT pg_advisory_xact_lock(hashtext(${`job-slot:${job.workspaceId}`}))
@@ -322,6 +395,23 @@ export async function publishHeldJobRevision(options: { jobId: string; revision:
       },
     });
   });
+
+  const { notifyWorkspaceMembers } = await import("@/lib/notifications/service");
+  await notifyWorkspaceMembers({
+    workspaceId: published.workspaceId,
+    kind: "job_listing_published",
+    title: "İş ilanı yayımlandı",
+    body: "İncelemedeki iş ilanın yayımlandı.",
+    href: "/isveren/ilanlar",
+    dedupeKeyPrefix: `job_listing:${published.id}:r${rev.revision}:published`,
+    payload: {
+      jobId: published.id,
+      workspaceId: published.workspaceId,
+      revision: rev.revision,
+    },
+  });
+
+  return published;
 }
 
 export async function closeJob(options: {

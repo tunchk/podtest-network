@@ -210,6 +210,31 @@ describe("m2.1 credits jobs suggestions moderation", () => {
     expect(after.bio).toBe("üye yeni bio");
     expect(after.skills).toEqual(["Playwright", "Kalite"]);
     expect(after.publicSnapshot).toEqual(publicBefore);
+
+    const creditsBeforeEmpty = await db.creditLedgerEntry.count({ where: { userId } });
+    await expect(
+      applyJobSuggestions({
+        userId,
+        jobId: job.id,
+        acceptedFields: [],
+        edits: {},
+        expectedDraftRevision: after.draftRevision,
+      }),
+    ).rejects.toThrow("NO_SELECTION");
+    const afterEmpty = await db.profile.findUniqueOrThrow({ where: { userId } });
+    expect(afterEmpty.draftRevision).toBe(after.draftRevision);
+    expect(afterEmpty.publicSnapshot).toEqual(publicBefore);
+    expect(await db.creditLedgerEntry.count({ where: { userId } })).toBe(creditsBeforeEmpty);
+
+    await expect(
+      applyJobSuggestions({
+        userId,
+        jobId: job.id,
+        acceptedFields: ["skills"],
+        edits: { skills: ["Playwright", "Kalite"] },
+        expectedDraftRevision: after.draftRevision - 1,
+      }),
+    ).rejects.toThrow("CONFLICT");
   });
 
   it("failed job releases reservation once; cancel ignores late results", async () => {

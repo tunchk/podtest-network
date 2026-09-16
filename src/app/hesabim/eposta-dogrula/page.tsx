@@ -29,7 +29,7 @@ function VerifyPanel() {
     }
     setSinkHint(data.verifyPath ?? null);
     setMsg(
-      "Yerel posta kutusu (mail-sink) dosyası yazıldı. Gerçek e-posta gönderilmedi. Aşağıdaki yolu kullan veya jetonu yapıştır.",
+      "Doğrulama bağlantısı hazırlandı. Bu ortamda gerçek e-posta gönderilmez; aşağıdaki kodu kullan.",
     );
     if (data.verifyPath?.includes("token=")) {
       setToken(String(data.verifyPath).split("token=")[1] ?? "");
@@ -58,10 +58,10 @@ function VerifyPanel() {
         onClick={() => void request()}
         className="rounded-md border border-[var(--line)] px-4 py-2 text-sm"
       >
-        Doğrulama jetonu oluştur (yerel mail-sink)
+        Doğrulama bağlantısı oluştur
       </button>
       <label className="block text-sm">
-        <span className="text-[var(--muted)]">Jeton</span>
+        <span className="text-[var(--muted)]">Doğrulama kodu</span>
         <input
           className="mt-1 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-2 font-mono text-sm"
           value={token}
@@ -75,7 +75,7 @@ function VerifyPanel() {
       >
         Doğrula
       </button>
-      {sinkHint ? <p className="text-xs text-[var(--muted)]">Yol: {sinkHint}</p> : null}
+      {sinkHint ? <p className="text-xs text-[var(--muted)]">Yerel bağlantı: {sinkHint}</p> : null}
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
       {msg ? <p className="text-sm text-[var(--muted)]">{msg}</p> : null}
     </div>
@@ -89,8 +89,7 @@ export default function EmailVerifyPage() {
         <h1 className="font-[family-name:var(--font-display)] text-3xl">E-posta doğrulama</h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
           Konuşmacı daveti e-posta ile bağlıysa, kabul için hesabın e-postasının doğrulanmış olması
-          gerekir. Bu ortamda gerçek e-posta gönderilmez; jetonlar yerel mail-sink dosyasına yazılır.
-          İstemcinin “doğrulandı” iddiası kabul edilmez.
+          gerekir. Bu ortamda gerçek e-posta gönderilmez.
         </p>
       </div>
       <Suspense fallback={<p className="text-sm">Yükleniyor…</p>}>

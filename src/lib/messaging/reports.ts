@@ -563,6 +563,19 @@ export async function releaseModerationHold(options: {
       where: { id: hold.id },
       data: { status: "RELEASED", resolvedAt: new Date() },
     });
+
+    const { createNotification } = await import("@/lib/notifications/service");
+    await createNotification({
+      userId: hold.recipientId!,
+      kind: "message_request",
+      title: "Yeni mesaj isteği",
+      body: "Bir üye sana mesaj isteği gönderdi.",
+      href: "/mesajlar",
+      payload: { requestId: request.id },
+      dedupeKey: `message_request:${request.id}`,
+      tx,
+    });
+
     return { kind: "request" as const, requestId: request.id };
   });
 }

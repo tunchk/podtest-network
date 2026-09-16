@@ -8,7 +8,8 @@
 
 - **Sponsored profile prepare**: idempotent lot key `sponsored:ai.profile.prepare:v1:{userId}`.
 - Job creation snapshots `creditCostSnapshot` and reserves atomically.
-- Success settles once (`settle:{jobId}`); failure/cancel releases once (`release:{jobId}`).
+- Success settles once (`settle:{jobId}`); cancel and **max-attempt** failure release once (`release:{jobId}`).
+- Retryable `FAILED` jobs (attempts remaining) **keep** the original reservation. `requestJobRetry` re-queues the same job id and must not create another `RESERVE`.
 
 ### Arayanlar prepare (M2.2)
 

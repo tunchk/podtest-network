@@ -48,7 +48,7 @@ function AcceptForm() {
   return (
     <div className="space-y-4">
       <label className="block text-sm">
-        <span className="text-[var(--muted)]">Davet jetonu</span>
+        <span className="text-[var(--muted)]">Davet kodu</span>
         <input
           className="mt-1 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-2 font-mono text-sm"
           value={token}

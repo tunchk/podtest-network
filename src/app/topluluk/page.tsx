@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { listPublishedQuestions } from "@/lib/community/questions";
-import { communityModerationLabel } from "@/lib/community/moderation";
 import { getSession } from "@/lib/session";
 import { ui } from "@/lib/ui-copy";
 
@@ -11,7 +10,6 @@ export default async function ToplulukPage({ searchParams }: { searchParams: Sea
   const page = Number(sp.sayfa ?? "1");
   const list = await listPublishedQuestions({ page });
   const session = await getSession();
-  const mod = communityModerationLabel();
 
   return (
     <section className="space-y-6">
@@ -20,31 +18,29 @@ export default async function ToplulukPage({ searchParams }: { searchParams: Sea
           <h1 className="font-[family-name:var(--font-display)] text-3xl">{ui.community.title}</h1>
           <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">{ui.community.lead}</p>
         </div>
-        <div className="flex flex-wrap gap-3 text-sm">
-          <Link href="/bolumler" className="rounded-md border border-[var(--line)] px-3 py-2 hover:bg-[var(--surface)]">
-            {ui.community.episodes}
+        {session?.user ? (
+          <Link
+            href="/topluluk/sor"
+            className="rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:bg-[var(--accent-strong)]"
+          >
+            {ui.community.ask}
           </Link>
-          {session?.user ? (
-            <Link
-              href="/topluluk/sor"
-              className="rounded-md bg-[var(--accent)] px-3 py-2 font-medium text-white hover:bg-[var(--accent-strong)]"
-            >
-              {ui.community.ask}
-            </Link>
-          ) : (
-            <Link href="/giris" className="rounded-md border border-[var(--line)] px-3 py-2">
-              Soru sormak için giriş yap
-            </Link>
-          )}
-        </div>
+        ) : (
+          <Link href="/giris" className="rounded-md border border-[var(--line)] px-3 py-2 text-sm">
+            Soru sormak için giriş yap
+          </Link>
+        )}
       </div>
 
-      <p className="rounded-md bg-[var(--accent-soft)] px-3 py-2 text-sm text-[var(--accent-strong)]">
-        {mod.description} Adaptör: {mod.adapter} · politika {mod.policyVersion}
-      </p>
-
       {list.items.length === 0 ? (
-        <p className="text-sm text-[var(--muted)]">{ui.community.empty}</p>
+        <div className="panel space-y-2 text-sm text-[var(--muted)]">
+          <p>{ui.community.empty}</p>
+          {session?.user ? (
+            <Link href="/topluluk/sor" className="text-[var(--accent)] underline">
+              {ui.community.ask}
+            </Link>
+          ) : null}
+        </div>
       ) : (
         <ul className="space-y-3">
           {list.items.map((q) => (

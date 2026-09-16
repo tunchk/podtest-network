@@ -35,18 +35,42 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       draftRevision: result.profile.draftRevision,
-      publicSnapshotUnchanged: true,
+      publicSnapshotUnchanged: result.publicSnapshotUnchanged,
     });
   } catch (error) {
     if (error instanceof Error && error.message === "CONFLICT") {
+      const currentDraftRevision =
+        "currentDraftRevision" in error && typeof error.currentDraftRevision === "number"
+          ? error.currentDraftRevision
+          : undefined;
       return NextResponse.json(
         {
           error: "conflict",
-          message: "Profil taslağı işlemden sonra değişti. Yeni düzenlemeler korundu; önerileri yeniden gözden geçirin.",
+          currentDraftRevision,
+          message:
+            "Profil taslağı işlemden sonra değişti. Yeni düzenlemeler korundu; önerileri yeniden gözden geçirip tekrar uygulamayı deneyin.",
         },
         { status: 409 },
       );
     }
-    return NextResponse.json({ error: "failed" }, { status: 400 });
+    if (error instanceof Error && error.message === "NO_SELECTION") {
+      return NextResponse.json(
+        {
+          error: "no_selection",
+          message: "Uygulamak için en az bir öneri seçin. Boş seçim taslağı değiştirmez.",
+        },
+        { status: 400 },
+      );
+    }
+    if (error instanceof Error && error.message === "Job not ready") {
+      return NextResponse.json(
+        { error: "job_not_ready", message: "Öneriler henüz hazır değil veya iş bulunamadı." },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json(
+      { error: "failed", message: "Seçilen öneriler uygulanamadı. Sayfayı yenileyip yeniden deneyin." },
+      { status: 400 },
+    );
   }
 }

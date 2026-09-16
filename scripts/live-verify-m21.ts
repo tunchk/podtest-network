@@ -268,3 +268,5 @@ main().catch((error) => {
   console.error("LIVE_VERIFY_FAIL", error instanceof Error ? error.message : error);
   process.exitCode = 1;
 });
+
+// Fixture emails from this script are registered in scripts/cleanup-verify-fixtures.ts

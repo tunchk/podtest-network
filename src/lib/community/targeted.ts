@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/db";
 import { isEitherBlocked } from "@/lib/messaging/blocks";
 import { TARGETED_QUESTION_MAX, TARGETED_QUESTIONS_PER_DAY, utcDayKey } from "@/lib/community/constants";
+import {
+  createNotification,
+  markRead,
+  unreadCount,
+  listNotifications,
+} from "@/lib/notifications/service";
 
 function fail(code: string): never {
   throw Object.assign(new Error(code), { code });
@@ -59,15 +65,15 @@ export async function sendTargetedExpertQuestion(options: {
         status: "OPEN",
       },
     });
-    await tx.inAppNotification.create({
-      data: {
-        userId: options.expertUserId,
-        kind: "targeted_expert_question",
-        title: "Yeni hedefli soru",
-        body: "Bir üye size hedefli bir soru gönderdi. Yanıt zorunlu değildir.",
-        href: "/hesabim/uzman",
-        payload: { targetedQuestionId: row.id },
-      },
+    await createNotification({
+      userId: options.expertUserId,
+      kind: "targeted_expert_question",
+      title: "Yeni hedefli soru",
+      body: "Bir üye size hedefli bir soru gönderdi. Yanıt zorunlu değildir.",
+      href: "/hesabim/uzman",
+      payload: { targetedQuestionId: row.id },
+      dedupeKey: `targeted_expert_question:${row.id}`,
+      tx,
     });
     return row;
   });
@@ -79,10 +85,26 @@ export async function declineTargetedQuestion(options: {
 }) {
   const row = await prisma.targetedExpertQuestion.findUnique({ where: { id: options.targetedId } });
   if (!row || row.expertUserId !== options.expertUserId) fail("NOT_FOUND");
-  return prisma.targetedExpertQuestion.update({
+  if (row.status === "DECLINED") return row;
+  if (row.status !== "OPEN") fail("INVALID_STATE");
+
+  const updated = await prisma.targetedExpertQuestion.update({
     where: { id: row.id },
     data: { status: "DECLINED" },
   });
+
+  // Asker only — no question body in the notification.
+  await createNotification({
+    userId: row.askerId,
+    kind: "targeted_expert_decline",
+    title: "Hedefli soru yanıtlanmayacak",
+    body: "Uzman, hedefli sorunuzu yanıtlamayacağını bildirdi.",
+    href: "/hesabim/profil",
+    payload: { targetedQuestionId: row.id },
+    dedupeKey: `targeted_expert_decline:${row.id}`,
+  });
+
+  return updated;
 }
 
 export async function listTargetedForExpert(expertUserId: string) {
@@ -93,19 +115,15 @@ export async function listTargetedForExpert(expertUserId: string) {
   });
 }
 
+/** @deprecated Prefer listNotifications / unreadCount from notifications/service */
 export async function listUnreadNotifications(userId: string) {
-  return prisma.inAppNotification.findMany({
-    where: { userId, readAt: null },
-    orderBy: { createdAt: "desc" },
-    take: 30,
-  });
+  const { items } = await listNotifications(userId, { take: 30 });
+  return items.filter((n) => n.readAt == null);
 }
 
+/** @deprecated Prefer markRead from notifications/service */
 export async function markNotificationRead(options: { userId: string; notificationId: string }) {
-  const n = await prisma.inAppNotification.findUnique({ where: { id: options.notificationId } });
-  if (!n || n.userId !== options.userId) fail("NOT_FOUND");
-  return prisma.inAppNotification.update({
-    where: { id: n.id },
-    data: { readAt: new Date() },
-  });
+  return markRead(options);
 }
+
+export { unreadCount };

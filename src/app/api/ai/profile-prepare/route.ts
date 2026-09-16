@@ -32,13 +32,19 @@ export async function GET(request: Request) {
   }
 
   const jobs = await prisma.aiJob.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, kind: "PROFILE_PREPARE" },
     orderBy: { createdAt: "desc" },
     take: 10,
   });
 
+  const profile = await prisma.profile.findUnique({
+    where: { userId: session.user.id },
+    select: { draftRevision: true },
+  });
+
   return NextResponse.json({
     jobs: jobs.map(toPublicJobView),
+    draftRevision: profile?.draftRevision ?? null,
     workerHint:
       "İş kuyruğu ayrı worker sürecinde işlenir. `npm run dev` hem web hem worker başlatır.",
   });
@@ -72,6 +78,12 @@ export async function POST(request: Request) {
   }
 
   try {
+    const { requireCvAiProcessingGate } = await import("@/lib/legal/service");
+    await requireCvAiProcessingGate({
+      userId: session.user.id,
+      cvDocumentId: body.cvDocumentId,
+      requireConsent: true,
+    });
     const job = await createProfilePrepareJob({
       userId: session.user.id,
       cvDocumentId: body.cvDocumentId,
@@ -81,7 +93,46 @@ export async function POST(request: Request) {
     if (error instanceof Error && error.message === "INSUFFICIENT_CREDITS") {
       return NextResponse.json({ error: "insufficient_credits" }, { status: 402 });
     }
-    return NextResponse.json({ error: "failed" }, { status: 400 });
+    if (error instanceof Error && error.message === "LEGAL_CV_NOTICE_REQUIRED") {
+      return NextResponse.json(
+        {
+          error: "LEGAL_CV_NOTICE_REQUIRED",
+          message: "CV aydınlatma onayını tamamlamadan AI hazırlığı başlatılamaz.",
+        },
+        { status: 403 },
+      );
+    }
+    if (error instanceof Error && error.message === "LEGAL_CV_CONSENT_REQUIRED") {
+      return NextResponse.json(
+        {
+          error: "LEGAL_CV_CONSENT_REQUIRED",
+          message: "AI destekli CV analizi için açık rıza gereklidir.",
+        },
+        { status: 403 },
+      );
+    }
+    if (error instanceof Error && error.message === "CV_NOT_READY") {
+      return NextResponse.json(
+        {
+          error: "CV_NOT_READY",
+          message: "CV metni henüz hazır değil. Dosyayı yeniden yükleyin veya metni yapıştırın.",
+        },
+        { status: 400 },
+      );
+    }
+    if (error instanceof Error && error.message === "CV_TEXT_MISSING") {
+      return NextResponse.json(
+        {
+          error: "CV_TEXT_MISSING",
+          message: "Kaydedilmiş CV metni bulunamadı. Dosyayı yeniden yükleyin.",
+        },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json(
+      { error: "failed", message: "AI hazırlığı başlatılamadı." },
+      { status: 400 },
+    );
   }
 }
 

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import type { DraftAnswers, SubmittedFacts } from "@/lib/arayanlar/constants";
+import { LegalCheckbox } from "@/components/legal/legal-checkbox";
 
 type AppView = {
   id: string;
@@ -26,7 +27,120 @@ type Quote = {
   currencyLabel: string;
 };
 
-export function ArayanlarGuestFlow() {
+type Stage = "tanisalim" | "kontrol" | "hazirlik";
+
+const FACT_FIELDS = [
+  ["targetRole", "Hedef rol"],
+  ["storyTopic", "Hikâye konusu"],
+  ["contribution", "Katkı"],
+  ["workPreferences", "Çalışma tercihleri"],
+  ["excludedTopics", "Hariç konular"],
+  ["contactChannel", "İletişim"],
+] as const;
+
+const SUMMARY_FIELDS = [
+  ["targetRole", "Hedef rol"],
+  ["storyTopic", "Gerçek deneyim / konu"],
+  ["contribution", "Senin katkın"],
+  ["workPreferences", "Çalışma tercihleri"],
+  ["excludedTopics", "Hariç tutulan konular"],
+  ["contactChannel", "Onaylı iletişim"],
+] as const;
+
+const prepStatusLabel: Record<string, string> = {
+  NOT_STARTED: "Başlamadı",
+  QUEUED: "Sırada",
+  RUNNING: "Hazırlanıyor",
+  READY: "Hazır",
+  FAILED: "Başarısız",
+  CANCELLED: "İptal",
+};
+
+function resolveStage(app: AppView): Stage {
+  if (app.status === "SUBMITTED") return "hazirlik";
+  if (app.status === "AWAITING_CONFIRMATION") return "kontrol";
+  return "tanisalim";
+}
+
+function StageTabs({ stage }: { stage: Stage }) {
+  const items: Array<{ id: Stage; label: string }> = [
+    { id: "tanisalim", label: "Tanışalım" },
+    { id: "kontrol", label: "Bilgilerini kontrol et" },
+    { id: "hazirlik", label: "Hazırlığın" },
+  ];
+  return (
+    <nav aria-label="Başvuru aşamaları" className="flex flex-wrap gap-2 text-sm">
+      {items.map((item) => {
+        const active = item.id === stage;
+        return (
+          <span
+            key={item.id}
+            aria-current={active ? "step" : undefined}
+            className={
+              active
+                ? "rounded-md bg-[var(--accent)] px-3 py-1.5 font-medium text-white"
+                : "rounded-md border border-[var(--line)] px-3 py-1.5 text-[var(--muted)]"
+            }
+          >
+            {item.label}
+          </span>
+        );
+      })}
+    </nav>
+  );
+}
+
+function ConversationBubbles({
+  turns,
+  endRef,
+}: {
+  turns: AppView["conversationTurns"];
+  endRef: RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions"
+      aria-label="Hazırlık sohbeti"
+      className="max-h-[min(24rem,50vh)] space-y-3 overflow-y-auto rounded-md border border-[var(--line)] bg-[var(--surface)] p-3"
+    >
+      {turns.length === 0 ? (
+        <p className="text-sm text-[var(--muted)]">Henüz mesaj yok.</p>
+      ) : (
+        turns.map((turn, i) => {
+          const isGuest = turn.role === "member";
+          const label = isGuest ? "Sen" : "Asistan";
+          return (
+            <div
+              key={i}
+              role="article"
+              aria-label={label}
+              className={`flex ${isGuest ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={
+                  isGuest
+                    ? "max-w-[85%] rounded-2xl rounded-br-md bg-[var(--accent)] px-3 py-2 text-sm text-white"
+                    : "max-w-[85%] rounded-2xl rounded-bl-md border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm text-[var(--ink)]"
+                }
+              >
+                <p className={`mb-1 text-xs font-semibold ${isGuest ? "text-white/80" : "text-[var(--muted)]"}`}>
+                  {label}
+                  {turn.skipped ? " · atlandı" : ""}
+                </p>
+                <p className="whitespace-pre-wrap">{turn.content}</p>
+              </div>
+            </div>
+          );
+        })
+      )}
+      <div ref={endRef} />
+    </div>
+  );
+}
+
+export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: boolean }) {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [app, setApp] = useState<AppView | null>(null);
   const [facts, setFacts] = useState<SubmittedFacts | null>(null);
@@ -34,20 +148,42 @@ export function ArayanlarGuestFlow() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [hostPrepShareOk, setHostPrepShareOk] = useState(false);
   const [summaryMode, setSummaryMode] = useState(false);
   const [summary, setSummary] = useState<DraftAnswers>({});
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [cvDocs, setCvDocs] = useState<
+    Array<{ id: string; originalFilename: string; extractionStatus: string }>
+  >([]);
+  const [selectedCvId, setSelectedCvId] = useState<string | null>(null);
+  const [cvNote, setCvNote] = useState<string | null>(null);
+  const [cvEntryArmed, setCvEntryArmed] = useState(startFromCv);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const autoCvStarted = useRef(false);
 
   const refresh = useCallback(async () => {
-    const [basvuru, gonder] = await Promise.all([
-      fetch("/api/arayanlar/basvuru").then((r) => r.json()),
-      fetch("/api/arayanlar/gonder").then((r) => r.json()),
-    ]);
-    setQuote(basvuru.quote);
-    setApp(basvuru.application ?? gonder.application);
-    setFacts(gonder.factsPreview);
-    setGuestBrief(gonder.guestBrief?.brief ?? null);
-    if (gonder.application?.draftAnswers) {
-      setSummary(gonder.application.draftAnswers);
+    try {
+      const [basvuru, gonder, cvRes] = await Promise.all([
+        fetch("/api/arayanlar/basvuru").then((r) => r.json()),
+        fetch("/api/arayanlar/gonder").then((r) => r.json()),
+        fetch("/api/cv").then((r) => (r.ok ? r.json() : { documents: [] })),
+      ]);
+      setQuote(basvuru.quote);
+      setApp(basvuru.application ?? gonder.application);
+      setFacts(gonder.factsPreview);
+      setGuestBrief(gonder.guestBrief?.brief ?? null);
+      if (gonder.application?.draftAnswers) {
+        setSummary(gonder.application.draftAnswers);
+      }
+      const okDocs = (cvRes.documents ?? []).filter(
+        (d: { extractionStatus: string }) => d.extractionStatus === "OK",
+      );
+      setCvDocs(okDocs);
+      setSelectedCvId((prev) => prev ?? okDocs[0]?.id ?? null);
+      setLoadFailed(false);
+    } catch {
+      setLoadFailed(true);
     }
   }, []);
 
@@ -55,86 +191,203 @@ export function ArayanlarGuestFlow() {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [app?.conversationTurns?.length, summaryMode]);
+
   async function confirmCost() {
+    if (busy) return;
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/arayanlar/basvuru", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "confirm_cost" }),
-    });
-    const data = await res.json();
-    setBusy(false);
-    if (!res.ok) {
-      setError(data.error ?? "Hata");
-      return;
+    try {
+      const res = await fetch("/api/arayanlar/basvuru", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "confirm_cost" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Hata");
+        return;
+      }
+      setQuote(data.quote);
+      setApp(data.application);
+    } finally {
+      setBusy(false);
     }
-    setQuote(data.quote);
-    setApp(data.application);
   }
 
   async function send(skip = false) {
+    if (busy) return;
+    if (!skip && !message.trim()) return;
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/arayanlar/sohbet", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, skip }),
-    });
-    const data = await res.json();
-    setBusy(false);
-    if (data.application) setApp(data.application);
-    if (!res.ok) {
-      setError(data.error ?? "Sohbet hatası — önceki cevapların korundu.");
-      return;
+    try {
+      const res = await fetch("/api/arayanlar/sohbet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, skip }),
+      });
+      const data = await res.json();
+      if (data.application) setApp(data.application);
+      if (!res.ok) {
+        setError(data.error ?? "Sohbet hatası — önceki cevapların korundu.");
+        return;
+      }
+      setMessage("");
+      await refresh();
+      inputRef.current?.focus();
+    } finally {
+      setBusy(false);
     }
-    setMessage("");
-    await refresh();
   }
 
   async function useSummary() {
+    if (busy) return;
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/arayanlar/sohbet", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ summaryFallback: true, answers: summary }),
-    });
-    const data = await res.json();
-    setBusy(false);
-    if (data.application) setApp(data.application);
-    await refresh();
+    try {
+      const res = await fetch("/api/arayanlar/sohbet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ summaryFallback: true, answers: summary }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Özet kaydedilemedi — önceki cevapların korundu.");
+        if (data.application) setApp(data.application);
+        return;
+      }
+      if (data.application) setApp(data.application);
+      setSummaryMode(false);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function submit() {
-    if (!facts) return;
+  async function useExistingCv(cvIdOverride?: string) {
+    const cvDocumentId = cvIdOverride ?? selectedCvId;
+    if (busy || !cvDocumentId) return;
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/arayanlar/gonder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "submit", facts }),
-    });
-    const data = await res.json();
-    setBusy(false);
-    if (!res.ok) {
-      setError(data.error ?? "Gönderilemedi");
+    setCvNote(null);
+    try {
+      const res = await fetch("/api/arayanlar/cv-onerileri", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cvDocumentId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.message ?? data.error ?? "CV önerileri uygulanamadı.");
+        return;
+      }
+      if (data.application) setApp(data.application);
+      if (data.factsPreview) setFacts(data.factsPreview);
+      if (data.application?.draftAnswers) setSummary(data.application.draftAnswers);
+      setCvNote(
+        Array.isArray(data.notes) && data.notes.length
+          ? data.notes.join(" ")
+          : "CV önerileri dolduruldu. Onay adımında düzenleyebilirsin.",
+      );
+      setSummaryMode(false);
+      setCvEntryArmed(false);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Explicit landing entry: /arayanlar?kaynak=cv → fill proposals from newest ready CV.
+  useEffect(() => {
+    if (!cvEntryArmed || autoCvStarted.current || busy || !selectedCvId) return;
+    if (app && (app.status === "SUBMITTED" || app.status === "WITHDRAWN")) return;
+    autoCvStarted.current = true;
+    void useExistingCv(selectedCvId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot entry from ?kaynak=cv
+  }, [cvEntryArmed, selectedCvId, app?.status, busy]);
+
+  async function submit() {
+    if (!facts || busy || !app) return;
+    if (!hostPrepShareOk) {
+      setError("Sunucu hazırlık paylaşımı bilgilendirmesini onaylamadan gönderemezsin.");
       return;
     }
-    setApp(data.application);
-    await refresh();
+    setBusy(true);
+    setError(null);
+    try {
+      const legal = await fetch("/api/yasal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "accept",
+          checked: true,
+          type: "HOST_PREP_SHARING",
+          documentType: "HOST_PREP_SHARING_NOTICE",
+          scope: "arayanlar_submit",
+          relatedResourceType: "arayanlar_application",
+          relatedResourceId: app.id,
+        }),
+      });
+      if (!legal.ok) {
+        const data = await legal.json();
+        setError(data.message ?? data.error ?? "Sunucu paylaşım onayı kaydedilemedi.");
+        return;
+      }
+      const res = await fetch("/api/arayanlar/gonder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "submit", facts }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(
+          data.error === "INSUFFICIENT_CREDITS"
+            ? "Yetersiz kredi. Rezervasyon yapılamadı; özetin korundu."
+            : data.error === "LEGAL_HOST_PREP_REQUIRED"
+              ? "Sunucu hazırlık paylaşımı onayı gerekli."
+              : (data.error ?? "Gönderilemedi"),
+        );
+        return;
+      }
+      setApp(data.application);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function withdraw() {
+    if (busy) return;
     setBusy(true);
-    const res = await fetch("/api/arayanlar/gonder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "withdraw" }),
-    });
-    const data = await res.json();
-    setBusy(false);
-    if (data.application) setApp(data.application);
+    setError(null);
+    try {
+      const res = await fetch("/api/arayanlar/gonder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "withdraw" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Geri çekilemedi");
+        return;
+      }
+      if (data.application) setApp(data.application);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loadFailed) {
+    return (
+      <div className="panel space-y-3">
+        <p className="text-sm text-red-700">Başvuru yüklenemedi.</p>
+        <button type="button" className="btn btn-primary" onClick={() => void refresh()}>
+          Yeniden dene
+        </button>
+      </div>
+    );
   }
 
   if (!app || !quote) {
@@ -148,163 +401,328 @@ export function ArayanlarGuestFlow() {
         <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void confirmCost()}>
           Yeniden başla
         </button>
+        {error ? <p className="text-sm text-red-700">{error}</p> : null}
       </div>
     );
   }
 
+  const stage = resolveStage(app);
+  const turns = app.conversationTurns ?? [];
+
   return (
-    <div className="space-y-8">
-      {!app.confirmedCostAt ? (
-        <section className="panel space-y-3">
-          <h2 className="font-[family-name:var(--font-display)] text-xl">Sponsorlu hazırlık</h2>
-          <p className="text-sm text-[var(--muted)]">{quote.note}</p>
-          <p className="text-sm">
-            Maliyet: <strong>{quote.cost}</strong> {quote.currencyLabel ?? "AI kredisi"} · Sponsorluk:{" "}
-            {quote.sponsoredAmount} · Mevcut bakiye: {quote.available}
-          </p>
-          <p className="text-xs text-[var(--muted)]">
-            Rezervasyon yalnızca gerçekleri onaylayıp gönderdiğinde başlar; sohbet mesaj başına ücretlendirilmez.
-          </p>
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void confirmCost()}>
-            Anladım, hazırlığa başla
-          </button>
-        </section>
-      ) : null}
+    <div className="space-y-6">
+      <StageTabs stage={stage} />
 
-      {app.confirmedCostAt && (app.status === "DRAFT" || app.status === "AWAITING_CONFIRMATION") ? (
-        <section className="panel space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-[family-name:var(--font-display)] text-xl">Kısa hazırlık sohbeti</h2>
-            <button
-              type="button"
-              className="text-sm text-[var(--accent)]"
-              onClick={() => setSummaryMode((v) => !v)}
-            >
-              {summaryMode ? "Sohbete dön" : "Özet formu kullan"}
-            </button>
-          </div>
+      {stage === "tanisalim" ? (
+        <section className="panel space-y-4" aria-labelledby="stage-tanisalim">
+          <h2 id="stage-tanisalim" className="font-[family-name:var(--font-display)] text-xl">
+            Tanışalım
+          </h2>
 
-          {!summaryMode ? (
+          {!app.confirmedCostAt ? (
             <>
-              <div className="max-h-80 space-y-3 overflow-y-auto rounded-md border border-[var(--line)] p-3 text-sm">
-                {(app.conversationTurns ?? []).map((turn, i) => (
-                  <p key={i} className={turn.role === "member" ? "text-[var(--ink)]" : "text-[var(--muted)]"}>
-                    <span className="font-medium">{turn.role === "member" ? "Sen: " : "Asistan: "}</span>
-                    {turn.content}
-                  </p>
-                ))}
+              <p className="text-sm text-[var(--muted)]">
+                Kısa bir hazırlık sohbeti veya düzenlenebilir özet ile devam edebilirsin. Kredi
+                rezervasyonu yalnızca bilgilerini onayladığında başlar. CV zorunlu değildir.
+              </p>
+              <p className="text-sm text-[var(--muted)]">{quote.note}</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => void confirmCost()}
+                >
+                  {busy ? "Başlatılıyor…" : "Tanışmaya başla"}
+                </button>
+                {cvDocs.length ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={busy || !selectedCvId}
+                    onClick={() => void useExistingCv()}
+                  >
+                    {busy ? "Dolduruluyor…" : "CV'mden bölüm hazırlığına başla"}
+                  </button>
+                ) : null}
               </div>
-              {app.status === "DRAFT" ? (
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    className="min-w-[16rem] flex-1 rounded-md border border-[var(--line)] bg-transparent px-3 py-2 text-sm"
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    placeholder="Kısa cevap…"
-                    disabled={busy}
-                  />
-                  <button type="button" className="btn btn-primary" disabled={busy || !message.trim()} onClick={() => void send(false)}>
-                    Gönder
-                  </button>
-                  <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void send(true)}>
-                    Atla
-                  </button>
+              {cvDocs.length ? (
+                <div className="space-y-2 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-3 text-sm">
+                  <p className="text-[var(--muted)]">
+                    Mevcut özel CV'nden düzenlenebilir öneriler üretilir. Profil önerilerini
+                    uygulamış olman gerekmez.
+                  </p>
+                  <label className="block">
+                    <span className="text-[var(--muted)]">CV</span>
+                    <select
+                      className="mt-1 w-full rounded-md border border-[var(--line)] bg-transparent px-3 py-2"
+                      value={selectedCvId ?? ""}
+                      onChange={(e) => setSelectedCvId(e.target.value || null)}
+                      disabled={busy}
+                    >
+                      {cvDocs.map((doc) => (
+                        <option key={doc.id} value={doc.id}>
+                          {doc.originalFilename}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {cvNote ? <p className="text-[var(--muted)]">{cvNote}</p> : null}
                 </div>
               ) : null}
             </>
           ) : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-[var(--muted)]">
+                  İsteğe bağlı sorular atlanabilir. Sohbet zorunlu değil; özet yolu da yeterli. CV
+                  zorunlu değildir.
+                </p>
+                <button
+                  type="button"
+                  className="text-sm text-[var(--accent)] underline"
+                  disabled={busy}
+                  onClick={() => setSummaryMode((v) => !v)}
+                >
+                  {summaryMode ? "Sohbete dön" : "Özet formu kullan"}
+                </button>
+              </div>
+
+              {cvDocs.length ? (
+                <div className="space-y-2 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-3 text-sm">
+                  <p className="font-medium">CV'mden bölüm hazırlığına başla</p>
+                  <p className="text-[var(--muted)]">
+                    Özel CV'ni seç; düzenlenebilir öneriler üretilir. Profil önerilerini uygulamış
+                    olman gerekmez. Onaylamadan hiçbir şey paylaşılmaz ve ekstra AI kredisi alınmaz.
+                  </p>
+                  <label className="block">
+                    <span className="text-[var(--muted)]">CV</span>
+                    <select
+                      className="mt-1 w-full rounded-md border border-[var(--line)] bg-transparent px-3 py-2"
+                      value={selectedCvId ?? ""}
+                      onChange={(e) => setSelectedCvId(e.target.value || null)}
+                      disabled={busy}
+                    >
+                      {cvDocs.map((doc) => (
+                        <option key={doc.id} value={doc.id}>
+                          {doc.originalFilename}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={busy || !selectedCvId}
+                    onClick={() => void useExistingCv()}
+                  >
+                    {busy ? "Dolduruluyor…" : "CV'mden bölüm hazırlığına başla"}
+                  </button>
+                  {cvNote ? <p className="text-[var(--muted)]">{cvNote}</p> : null}
+                </div>
+              ) : null}
+
+              {!summaryMode ? (
+                <>
+                  <ConversationBubbles turns={turns} endRef={chatEndRef} />
+                  {app.status === "DRAFT" ? (
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                      <input
+                        ref={inputRef}
+                        className="min-w-0 flex-1 rounded-md border border-[var(--line)] bg-transparent px-3 py-2 text-sm"
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            void send(false);
+                          }
+                        }}
+                        placeholder="Kısa cevap…"
+                        disabled={busy}
+                        aria-label="Yanıtın"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          disabled={busy || !message.trim()}
+                          onClick={() => void send(false)}
+                        >
+                          {busy ? "Gönderiliyor…" : "Yanıtı gönder"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          disabled={busy}
+                          onClick={() => void send(true)}
+                        >
+                          Atla
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          disabled={busy}
+                          onClick={() => setSummaryMode(true)}
+                        >
+                          Özeti kontrol et
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="space-y-2 text-sm">
+                  <p className="text-[var(--muted)]">
+                    Alanları düzenleyip özeti kaydet; sohbet gerekmez. Onay adımına geçersin.
+                  </p>
+                  {SUMMARY_FIELDS.map(([key, label]) => (
+                    <label key={key} className="block">
+                      <span className="text-[var(--muted)]">{label}</span>
+                      <input
+                        className="mt-1 w-full rounded-md border border-[var(--line)] bg-transparent px-3 py-2"
+                        value={summary[key] ?? ""}
+                        onChange={(e) => setSummary((s) => ({ ...s, [key]: e.target.value }))}
+                        disabled={busy}
+                      />
+                    </label>
+                  ))}
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busy}
+                    onClick={() => void useSummary()}
+                  >
+                    {busy ? "Kaydediliyor…" : "Özeti kontrol et"}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      ) : null}
+
+      {stage === "kontrol" ? (
+        <section className="panel space-y-4" aria-labelledby="stage-kontrol">
+          <h2 id="stage-kontrol" className="font-[family-name:var(--font-display)] text-xl">
+            Bilgilerini kontrol et
+          </h2>
+          <p className="text-sm text-[var(--muted)]">
+            Sunucular yalnızca burada onayladığın alanları görür. Ham CV, özel AI sohbeti ve ilgisiz
+            profil alanları varsayılan olarak paylaşılmaz. Onaydan önce düzenleyebilirsin.
+          </p>
+
+          {facts ? (
             <div className="space-y-2 text-sm">
-              {(
-                [
-                  ["targetRole", "Hedef rol"],
-                  ["storyTopic", "Gerçek deneyim / konu"],
-                  ["contribution", "Senin katkın"],
-                  ["workPreferences", "Çalışma tercihleri"],
-                  ["excludedTopics", "Hariç tutulan konular"],
-                  ["contactChannel", "Onaylı iletişim"],
-                ] as const
-              ).map(([key, label]) => (
+              {FACT_FIELDS.map(([key, label]) => (
                 <label key={key} className="block">
                   <span className="text-[var(--muted)]">{label}</span>
                   <input
                     className="mt-1 w-full rounded-md border border-[var(--line)] bg-transparent px-3 py-2"
-                    value={summary[key] ?? ""}
-                    onChange={(e) => setSummary((s) => ({ ...s, [key]: e.target.value }))}
+                    value={facts[key] ?? ""}
+                    onChange={(e) => setFacts({ ...facts, [key]: e.target.value })}
+                    disabled={busy}
                   />
                 </label>
               ))}
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void useSummary()}>
-                Özeti kaydet
-              </button>
             </div>
+          ) : (
+            <p className="text-sm text-[var(--muted)]">Özet yükleniyor…</p>
           )}
-        </section>
-      ) : null}
 
-      {(app.status === "AWAITING_CONFIRMATION" || summaryMode) && facts && app.status !== "SUBMITTED" ? (
-        <section className="panel space-y-4">
-          <h2 className="font-[family-name:var(--font-display)] text-xl">Paylaşılacak gerçekler</h2>
-          <p className="text-sm text-[var(--muted)]">
-            Sunucular yalnızca burada onayladığın alanları görür. Ham CV, özel AI sohbeti ve ilgisiz profil alanları
-            varsayılan olarak paylaşılmaz.
-          </p>
-          <div className="space-y-2 text-sm">
-            {(
-              [
-                ["targetRole", "Hedef rol"],
-                ["storyTopic", "Hikâye konusu"],
-                ["contribution", "Katkı"],
-                ["workPreferences", "Çalışma tercihleri"],
-                ["excludedTopics", "Hariç konular"],
-                ["contactChannel", "İletişim"],
-              ] as const
-            ).map(([key, label]) => (
-              <label key={key} className="block">
-                <span className="text-[var(--muted)]">{label}</span>
-                <input
-                  className="mt-1 w-full rounded-md border border-[var(--line)] bg-transparent px-3 py-2"
-                  value={facts[key] ?? ""}
-                  onChange={(e) => setFacts({ ...facts, [key]: e.target.value })}
-                />
-              </label>
-            ))}
+          <div className="rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-3 text-sm">
+            <p className="font-medium">Kredi rezervasyonu (onayda başlar)</p>
+            <p className="mt-1 text-[var(--muted)]">{quote.note}</p>
+            <p className="mt-2">
+              Maliyet: <strong>{quote.cost}</strong> {quote.currencyLabel ?? "AI kredisi"} ·
+              Sponsorluk: {quote.sponsoredAmount} · Mevcut bakiye: {quote.available}
+            </p>
+            {!quote.canAffordAfterGrant ? (
+              <p className="mt-2 text-sm text-red-700">
+                Sponsorluk sonrası bakiye yetersiz görünebilir. Onay başarısız olursa özetin korunur.
+              </p>
+            ) : null}
           </div>
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void submit()}>
-            Gerçekleri onayla ve gönder
+
+          <fieldset className="space-y-2 rounded-md border border-[var(--line)] p-3 text-sm">
+            <legend className="px-1 font-medium">Sunucu paylaşımı</legend>
+            <p className="text-[var(--muted)]">
+              Atanan sunucu ham CV dosyanı görmez; yalnızca onayladığın gerçekler ve türetilmiş
+              hazırlık paketini görür.
+            </p>
+            <LegalCheckbox
+              id="host-prep-share"
+              label="Atanan sunucuya türetilmiş hazırlık paketinin gösterilebileceğini anlıyorum."
+              href="/yasal/host_prep_sharing_notice"
+              checked={hostPrepShareOk}
+              onChange={setHostPrepShareOk}
+              required
+            />
+          </fieldset>
+
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy || !facts || !hostPrepShareOk}
+            onClick={() => void submit()}
+          >
+            {busy ? "Gönderiliyor…" : "Bilgilerimi onayla ve hazırlığı başlat"}
           </button>
           <p className="text-xs text-[var(--muted)]">
-            Gönderim davet veya kesin kayıt tarihi değildir. Bu adım krediyi rezerve eder; her iki hazırlık çıktısı
-            hazır olunca düşülür.
+            Gönderim davet veya kesin kayıt tarihi değildir. Bu adım krediyi rezerve eder; her iki
+            hazırlık çıktısı hazır olunca düşülür. Onaydan önce yukarıdaki alanları düzenleyebilirsin.
           </p>
         </section>
       ) : null}
 
-      {app.status === "SUBMITTED" ? (
-        <section className="panel space-y-3">
-          <h2 className="font-[family-name:var(--font-display)] text-xl">Başvuru durumu</h2>
+      {stage === "hazirlik" ? (
+        <section className="panel space-y-4" aria-labelledby="stage-hazirlik">
+          <h2 id="stage-hazirlik" className="font-[family-name:var(--font-display)] text-xl">
+            Hazırlığın
+          </h2>
           <p className="text-sm">
-            Hazırlık: <strong>{app.prepStatus}</strong>
+            Durum:{" "}
+            <strong>{prepStatusLabel[app.prepStatus] ?? app.prepStatus}</strong>
           </p>
+
           {app.prepStatus === "READY" && guestBrief ? (
-            <div className="space-y-2 text-sm">
+            <div className="space-y-3 text-sm">
               <p className="font-medium">Konuk brifin hazır</p>
-              <p>{String(guestBrief.recordingWhatToExpect ?? "")}</p>
+              <p className="text-[var(--muted)]">{String(guestBrief.recordingWhatToExpect ?? "")}</p>
               <Link href="/arayanlar/hazirligim" className="btn btn-primary inline-flex">
                 Hazırlığımı gör
               </Link>
             </div>
+          ) : app.prepStatus === "FAILED" ? (
+            <div className="space-y-2 text-sm">
+              <p className="text-red-700">
+                Hazırlık tamamlanamadı. Kısmi çıktı başarı sayılmaz. Yeniden denemek için başvuruyu
+                gözden geçirebilir veya geri çekebilirsin.
+              </p>
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void refresh()}>
+                Durumu yenile
+              </button>
+            </div>
           ) : (
-            <p className="text-sm text-[var(--muted)]">
-              İki ayrı paket üretiliyor. Kısmi hata olursa hazırlık tamamlanmış sayılmaz.
-            </p>
+            <div className="space-y-2 text-sm text-[var(--muted)]">
+              <p>İki ayrı paket üretiliyor. Kısmi hata olursa hazırlık tamamlanmış sayılmaz.</p>
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void refresh()}>
+                {busy ? "Yenileniyor…" : "Durumu yenile"}
+              </button>
+            </div>
           )}
+
           <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void withdraw()}>
             Başvuruyu geri çek
           </button>
         </section>
       ) : null}
 
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="text-sm text-red-700">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

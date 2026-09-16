@@ -38,6 +38,8 @@ export type DraftAnswers = {
   excludedTopics?: string;
   contactChannel?: string;
   extraNotes?: string;
+  /** Internal grounding labels; stripped before host-facing submitted facts. */
+  sourceHints?: string[];
 };
 
 export type ConversationTurn = {

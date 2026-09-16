@@ -111,8 +111,14 @@ export async function getOwnedJob(jobId: string, userId: string) {
 export async function cancelOwnedJob(jobId: string, userId: string) {
   const job = await getOwnedJob(jobId, userId);
   if (!job) throw new Error("Not found");
-  if (job.status === "READY" || job.status === "FAILED" || job.status === "CANCELLED") {
+  if (job.status === "READY" || job.status === "CANCELLED") {
     return job;
+  }
+
+  // Abandon a retryable FAILED job and return any still-held reservation.
+  if (job.status === "FAILED") {
+    await releaseJobReservation(jobId);
+    return getOwnedJob(jobId, userId);
   }
 
   const updated = await prisma.aiJob.updateMany({
@@ -147,7 +153,6 @@ export async function requestJobRetry(jobId: string, userId: string) {
     throw new Error("Max attempts");
   }
 
-  // Re-queue retaining the same reservation if still held; otherwise re-reserve.
   const reserve = await prisma.creditLedgerEntry.findUnique({
     where: { idempotencyKey: `reserve:${jobId}` },
   });
@@ -160,12 +165,16 @@ export async function requestJobRetry(jobId: string, userId: string) {
 
   if (settled) throw new Error("Already settled");
 
-  if (released || !reserve) {
-    await reserveCreditsForJob({
-      userId,
-      jobId,
-      amount: job.creditCostSnapshot,
-    });
+  // Retryable failures keep the original reservation held. Never create a second RESERVE
+  // (would be a new charge) and never call reserveCreditsForJob after RELEASE (idempotent
+  // reserve:${jobId} would return the old row without restoring lot.reservedAmount).
+  if (job.creditCostSnapshot > 0) {
+    if (!reserve) {
+      throw new Error("Missing reservation");
+    }
+    if (released) {
+      throw new Error("Reservation released");
+    }
   }
 
   return prisma.aiJob.update({
@@ -598,6 +607,23 @@ async function processArayanlarPrepareJob(jobId: string, workerId: string) {
     return;
   }
 
+  if (!isHostRegen) {
+    const { createNotification } = await import("@/lib/notifications/service");
+    // Guest brief only — never mention host pack contents.
+    await createNotification({
+      userId: application.userId,
+      kind: "arayanlar_prep_ready",
+      title: "Arayanlar hazırlığın hazır",
+      body: "Misafir hazırlık özetin görüntülenmeye hazır.",
+      href: "/arayanlar/hazirligim",
+      payload: {
+        applicationId: application.id,
+        submittedRevision: revision,
+      },
+      dedupeKey: `arayanlar_prep_ready:${application.id}:r${revision}`,
+    });
+  }
+
   if (job.creditCostSnapshot > 0) {
     await settleJobReservation(jobId);
   }
@@ -610,7 +636,7 @@ async function failArayanlarJob(
   releaseCredits: boolean,
   mode?: string,
 ) {
-  await prisma.aiJob.update({
+  const updated = await prisma.aiJob.update({
     where: { id: jobId },
     data: {
       status: "FAILED",
@@ -622,13 +648,19 @@ async function failArayanlarJob(
       leaseExpiresAt: null,
     },
   });
-  if (releaseCredits) {
+  // Keep the original reservation for retryable failures; release only when exhausted
+  // (or when caller opts out of retries by passing releaseCredits with max attempts).
+  if (
+    releaseCredits &&
+    updated.creditCostSnapshot > 0 &&
+    updated.attemptCount >= updated.maxAttempts
+  ) {
     await releaseJobReservation(jobId);
   }
 }
 
 async function failJob(jobId: string, code: string, message: string, mode?: string) {
-  await prisma.aiJob.update({
+  const updated = await prisma.aiJob.update({
     where: { id: jobId },
     data: {
       status: "FAILED",
@@ -640,7 +672,10 @@ async function failJob(jobId: string, code: string, message: string, mode?: stri
       leaseExpiresAt: null,
     },
   });
-  await releaseJobReservation(jobId);
+  // Retryable FAILED keeps the same reserved credits; only terminal (max attempts) releases.
+  if (updated.creditCostSnapshot > 0 && updated.attemptCount >= updated.maxAttempts) {
+    await releaseJobReservation(jobId);
+  }
 }
 
 export async function applyJobSuggestions(options: {
@@ -659,7 +694,13 @@ export async function applyJobSuggestions(options: {
   if (!profile) throw new Error("Profile missing");
 
   if (profile.draftRevision !== options.expectedDraftRevision) {
-    throw new Error("CONFLICT");
+    const err = new Error("CONFLICT") as Error & { currentDraftRevision?: number };
+    err.currentDraftRevision = profile.draftRevision;
+    throw err;
+  }
+
+  if (!options.acceptedFields.length) {
+    throw new Error("NO_SELECTION");
   }
 
   const parsed = profileSuggestionSchema.safeParse(job.resultJson);
@@ -764,15 +805,26 @@ export async function applyJobSuggestions(options: {
   }
 
   // Empty extracted fields must not erase existing content — only apply non-empty patches.
+  // Do not bump draftRevision when nothing would change (avoids false "applied" success).
+  if (Object.keys(patch).length === 0) {
+    throw new Error("NO_SELECTION");
+  }
+
+  const publicBefore = profile.publicSnapshot;
   const updated = await updateOwnedProfileDraft(options.userId, patch);
   // Never touch publicSnapshot here
   const still = await prisma.profile.findUniqueOrThrow({ where: { id: profile.id } });
-  return { profile: updated, publicSnapshotUnchanged: still.publicSnapshot };
+  return {
+    profile: updated,
+    publicSnapshotUnchanged:
+      JSON.stringify(still.publicSnapshot) === JSON.stringify(publicBefore),
+  };
 }
 
 export function toPublicJobView(job: {
   id: string;
   status: string;
+  kind?: string;
   attemptCount: number;
   maxAttempts: number;
   creditCostSnapshot: number;
@@ -788,6 +840,7 @@ export function toPublicJobView(job: {
 }) {
   return {
     id: job.id,
+    kind: job.kind ?? null,
     status: job.status,
     attemptCount: job.attemptCount,
     maxAttempts: job.maxAttempts,

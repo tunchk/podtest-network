@@ -194,3 +194,5 @@ main().catch(async (e) => {
   await db.$disconnect();
   process.exit(1);
 });
+
+// Fixture emails from this script are registered in scripts/cleanup-verify-fixtures.ts

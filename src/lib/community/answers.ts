@@ -72,7 +72,7 @@ export async function submitAnswer(options: {
   answerId: string;
   idempotencyKey: string;
 }) {
-  return prisma.$transaction(async (tx) => {
+  const answer = await prisma.$transaction(async (tx) => {
     const a = await tx.communityAnswer.findUnique({ where: { id: options.answerId } });
     if (!a || a.authorId !== options.authorId) fail("NOT_FOUND");
     if (a.status === "REMOVED_BY_OWNER" || a.status === "REMOVED_BY_MODERATOR") fail("REMOVED");
@@ -174,6 +174,31 @@ export async function submitAnswer(options: {
       },
     });
   });
+
+  if (answer.status === "PUBLISHED" && answer.publishedRevision != null) {
+    const question = await prisma.communityQuestion.findUnique({
+      where: { id: answer.questionId },
+      select: { id: true, authorId: true, status: true },
+    });
+    if (question && question.status === "PUBLISHED" && question.authorId !== options.authorId) {
+      const { createNotification } = await import("@/lib/notifications/service");
+      await createNotification({
+        userId: question.authorId,
+        kind: "community_answer_published",
+        title: "Soruna yeni yanıt geldi",
+        body: "Yayımlanan bir yanıt eklendi.",
+        href: `/topluluk/sorular/${question.id}`,
+        payload: {
+          questionId: question.id,
+          answerId: answer.id,
+          revision: answer.publishedRevision,
+        },
+        dedupeKey: `community_answer:${answer.id}:r${answer.publishedRevision}:published`,
+      });
+    }
+  }
+
+  return answer;
 }
 
 export async function removeAnswerByOwner(options: { authorId: string; answerId: string }) {
@@ -200,7 +225,7 @@ export async function publishHeldAnswerRevision(options: {
     where: { answerId_revision: { answerId: options.answerId, revision: options.revision } },
   });
   if (!rev) fail("NOT_FOUND");
-  return prisma.communityAnswer.update({
+  const answer = await prisma.communityAnswer.update({
     where: { id: options.answerId },
     data: {
       body: rev.body,
@@ -210,6 +235,29 @@ export async function publishHeldAnswerRevision(options: {
       moderationReason: null,
     },
   });
+
+  const question = await prisma.communityQuestion.findUnique({
+    where: { id: answer.questionId },
+    select: { id: true, authorId: true, status: true },
+  });
+  if (question && question.status === "PUBLISHED" && question.authorId !== answer.authorId) {
+    const { createNotification } = await import("@/lib/notifications/service");
+    await createNotification({
+      userId: question.authorId,
+      kind: "community_answer_published",
+      title: "Soruna yeni yanıt geldi",
+      body: "Yayımlanan bir yanıt eklendi.",
+      href: `/topluluk/sorular/${question.id}`,
+      payload: {
+        questionId: question.id,
+        answerId: answer.id,
+        revision: answer.publishedRevision,
+      },
+      dedupeKey: `community_answer:${answer.id}:r${answer.publishedRevision}:published`,
+    });
+  }
+
+  return answer;
 }
 
 export { communityModerationLabel };

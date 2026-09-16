@@ -35,7 +35,41 @@ export default async function RegisterPage() {
             autoComplete="new-password"
           />
         </div>
-        <button type="submit" className="btn btn-primary w-full">
+        <fieldset className="mt-4 space-y-3 rounded-md border border-[var(--line)] p-3 text-sm">
+          <legend className="px-1 font-medium">Yasal bilgilendirme</legend>
+          <p className="text-[var(--muted)]">
+            Kutular önceden işaretli değildir. Kullanım koşulları ile aydınlatma metni ayrı
+            kabul edilir.
+          </p>
+          <label className="flex items-start gap-2">
+            <input type="checkbox" name="acceptTerms" value="true" required className="mt-1" />
+            <span>
+              Kullanım Koşulları’nı okudum ve kabul ediyorum.{" "}
+              <Link href="/yasal/terms_of_service" className="underline" target="_blank">
+                Metni aç
+              </Link>
+            </span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input type="checkbox" name="acceptPrivacy" value="true" required className="mt-1" />
+            <span>
+              Aydınlatma Metni’ni okudum.{" "}
+              <Link href="/yasal/privacy_notice" className="underline" target="_blank">
+                Metni aç
+              </Link>
+            </span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input type="checkbox" name="acceptMarketing" value="true" className="mt-1" />
+            <span>
+              İsteğe bağlı: pazarlama / bülten iletileri almak istiyorum.{" "}
+              <Link href="/yasal/marketing_consent" className="underline" target="_blank">
+                Metni aç
+              </Link>
+            </span>
+          </label>
+        </fieldset>
+        <button type="submit" className="btn btn-primary mt-4 w-full">
           {ui.auth.submitRegister}
         </button>
       </ActionForm>

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-export function CreateWorkspaceForm() {
+export function CreateWorkspaceForm({ canCreate = true }: { canCreate?: boolean }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -12,6 +12,7 @@ export function CreateWorkspaceForm() {
   const [msg, setMsg] = useState<string | null>(null);
 
   async function submit() {
+    if (!canCreate) return;
     setError(null);
     const res = await fetch("/api/isveren", {
       method: "POST",
@@ -63,7 +64,7 @@ export function CreateWorkspaceForm() {
       {msg ? <p className="text-sm text-[var(--muted)]">{msg}</p> : null}
       <button
         type="button"
-        disabled={!name.trim()}
+        disabled={!canCreate || !name.trim()}
         onClick={() => void submit()}
         className="rounded-md bg-[var(--accent)] px-4 py-2 text-sm text-white disabled:opacity-50"
       >

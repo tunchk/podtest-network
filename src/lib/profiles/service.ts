@@ -316,8 +316,8 @@ export async function resolvePublicationReview(options: {
   // Approving applies this review's submitted snapshot only — never the live draft.
   // Snapshot integrity is the stored row itself; do not re-hash Prisma JSON (key order may differ).
 
-  return prisma.$transaction(async (tx) => {
-    const resolved = await tx.publicationReview.update({
+  const resolved = await prisma.$transaction(async (tx) => {
+    const updated = await tx.publicationReview.update({
       where: { id: review.id },
       data: {
         status: options.decision,
@@ -363,6 +363,31 @@ export async function resolvePublicationReview(options: {
       });
     }
 
-    return resolved;
+    return updated;
   });
+
+  const { createNotification } = await import("@/lib/notifications/service");
+  if (options.decision === "APPROVED") {
+    await createNotification({
+      userId: review.profile.userId,
+      kind: "profile_review_approved",
+      title: "Profilin yayına alındı",
+      body: "Profil yayın incelemen onaylandı.",
+      href: "/hesabim/profil",
+      payload: { reviewId: review.id },
+      dedupeKey: `profile_review:${review.id}:APPROVED`,
+    });
+  } else {
+    await createNotification({
+      userId: review.profile.userId,
+      kind: "profile_review_rejected",
+      title: "Profil yayın incelemesi sonuçlandı",
+      body: "Profil yayın başvurun reddedildi. Taslağını güncelleyip yeniden gönderebilirsin.",
+      href: "/hesabim/profil",
+      payload: { reviewId: review.id },
+      dedupeKey: `profile_review:${review.id}:REJECTED`,
+    });
+  }
+
+  return resolved;
 }

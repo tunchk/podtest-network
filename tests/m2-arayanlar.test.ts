@@ -22,10 +22,24 @@ import {
 } from "@/lib/credits/ledger";
 import type { SubmittedFacts } from "@/lib/arayanlar/constants";
 import type { HostPack } from "@/lib/arayanlar/artifact-schema";
+import { recordAcceptance, ensureLegalDocumentsSeeded } from "@/lib/legal/service";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 const db = new PrismaClient({ adapter });
 const suffix = `m22-${Date.now().toString(36)}`;
+
+async function acceptHostPrep(userId: string) {
+  await ensureLegalDocumentsSeeded();
+  const app = await db.arayanlarApplication.findUniqueOrThrow({ where: { userId } });
+  await recordAcceptance({
+    userId,
+    type: "HOST_PREP_SHARING",
+    documentType: "HOST_PREP_SHARING_NOTICE",
+    scope: "test",
+    relatedResourceType: "arayanlar_application",
+    relatedResourceId: app.id,
+  });
+}
 
 async function createUser(label: string, verified = true) {
   return db.user.create({
@@ -91,6 +105,56 @@ describe("m2.2 arayanlar preparation", () => {
     expect(profile).toBeNull();
   });
 
+  it("explicit existing-CV proposals fill editable facts without charging credits", async () => {
+    const { storePasteTextAsCv } = await import("@/lib/cv/service");
+    const { applyOwnedCvProposalsToApplication, getOrCreateApplication } = await import(
+      "@/lib/arayanlar/service"
+    );
+
+    const cvGuest = await createUser("m22-cv-guest");
+    ids.push(cvGuest.id);
+
+    await getOrCreateApplication(cvGuest.id);
+    await confirmCostAndStart(cvGuest.id);
+    const balanceBefore = await getAvailableCreditBalanceForArayanlar(cvGuest.id);
+    const ledgerBefore = await db.creditLedgerEntry.count({ where: { userId: cvGuest.id } });
+
+    const cv = await storePasteTextAsCv(
+      cvGuest.id,
+      [
+        "Ada Örnek",
+        "Kıdemli Kalite Mühendisi",
+        "Beceri: Playwright, TypeScript, API testi",
+        "Deneyim",
+        "Örnek şirkette flake sınıflandırma sistemi kurdum",
+        "Hibrit çalışma tercihi",
+      ].join("\n"),
+    );
+    if (!cv.ok) throw new Error("cv failed");
+
+    const { application, proposal } = await applyOwnedCvProposalsToApplication(
+      cvGuest.id,
+      cv.documentId,
+    );
+    expect(application.status).toBe("AWAITING_CONFIRMATION");
+    const answers = application.draftAnswers as {
+      targetRole?: string;
+      contribution?: string;
+      storyTopic?: string;
+      sourceHints?: string[];
+    };
+    expect(answers.targetRole || answers.contribution || answers.storyTopic).toBeTruthy();
+    expect(proposal.hints.some((h) => h.startsWith("cv→") || h.startsWith("profile."))).toBe(
+      true,
+    );
+    // Raw multi-line CV body is not dumped into draft JSON; only grounded field snippets.
+    expect(JSON.stringify(application.draftAnswers)).not.toMatch(
+      /Ada Örnek\\nKıdemli Kalite Mühendisi\\nBeceri:/,
+    );
+    expect(await getAvailableCreditBalanceForArayanlar(cvGuest.id)).toBe(balanceBefore);
+    expect(await db.creditLedgerEntry.count({ where: { userId: cvGuest.id } })).toBe(ledgerBefore);
+  });
+
   it("resumes without duplicating grants; chat answers persist", async () => {
     await confirmCostAndStart(guestId);
     const before = await getAvailableCreditBalanceForArayanlar(guestId);
@@ -135,6 +199,7 @@ describe("m2.2 arayanlar preparation", () => {
     };
 
     const balanceBefore = await getAvailableCreditBalanceForArayanlar(guestId);
+    await acceptHostPrep(guestId);
     const { jobId } = await submitApplication({ userId: guestId, facts });
     expect(jobId).toBeTruthy();
 
@@ -302,6 +367,7 @@ describe("m2.2 arayanlar preparation", () => {
     const answersBefore = app.draftAnswers;
 
     // Simulate failure by cancelling after queue (answers must remain)
+    await acceptHostPrep(guestId);
     const { jobId } = await submitApplication({ userId: guestId, facts });
     await db.aiJob.update({
       where: { id: jobId },

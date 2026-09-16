@@ -15,10 +15,13 @@ Prep status (`NOT_STARTED` → `QUEUED` → `RUNNING` → `READY` | `FAILED` | `
 
 - create → `DRAFT`
 - chat/summary complete → `AWAITING_CONFIRMATION`
+- optional explicit “use existing private CV” → grounded editable proposals → `AWAITING_CONFIRMATION` (no AI credit charge; raw CV never stored on the application)
 - confirm submit → `SUBMITTED` + prep `QUEUED`
 - withdraw from any non-terminal → `WITHDRAWN`
 - after withdraw, confirm cost may reopen a fresh `DRAFT` (same row; new revision on next submit)
 - post-submit “revise” returns to `DRAFT` without rewriting the prior submitted revision or packs
+
+CV is optional. Members can still use chat or the editable summary with no CV.
 
 ## Artifacts
 

@@ -9,6 +9,8 @@ import { automatedReviewMatches } from "@/lib/moderation/automated-review";
 import { listSpeakerInvitations } from "@/lib/community/invitations";
 import { listAdminEpisodes, listPendingAppearancesForAdmin } from "@/lib/community/episodes";
 import { AdminCommunityPanel } from "@/components/community/admin-community-panel";
+import { AdminRssImportPanel } from "@/components/community/admin-rss-import-panel";
+import { AdminLegalAudit } from "@/components/legal/admin-legal-audit";
 import Link from "next/link";
 
 export default async function AdminPage() {
@@ -36,18 +38,45 @@ export default async function AdminPage() {
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-3xl">{ui.admin.title}</h1>
         <p className="mt-2 rounded-md bg-[var(--accent-soft)] px-3 py-2 text-sm text-[var(--accent-strong)]">
-          {ui.admin.manualBanner} Yardımcı tarama kural tabanlıdır (OpenAI moderasyon
-          entegrasyonu değildir). İnsan onayı zorunludur. Kullanılamayan tarama güvenli sayılmaz. Üye
-          CV dosyaları burada gösterilmez.
+          {ui.admin.manualBanner} Üye CV dosyaları burada gösterilmez.
         </p>
-        <p className="mt-2 text-sm">
-          <Link href="/yonetim/moderasyon" className="underline">
-            Mesaj / içerik rapor kuyruğu
+        <nav
+          aria-label="Yönetim kısayolları"
+          className="mt-4 grid gap-2 rounded-lg border border-[var(--line)] p-4 text-sm sm:grid-cols-2"
+        >
+          <Link href="/yonetim#profil-incelemeleri" className="underline">
+            Profil yayın incelemeleri
           </Link>
+          <Link href="/yonetim/moderasyon" className="underline">
+            Mesaj / içerik / iş ilanı rapor kuyruğu
+          </Link>
+          {isAdmin ? (
+            <>
+              <Link href="/yonetim#davetler" className="underline">
+                Konuşmacı davetleri
+              </Link>
+              <Link href="/yonetim#bolumler-rss" className="underline">
+                Bölümler ve RSS içe aktarma
+              </Link>
+              <Link href="/sunucu/basvurular" className="underline">
+                Arayanlar sunucu başvuruları
+              </Link>
+            </>
+          ) : null}
+          <Link href="/yonetim#yasal-denetim" className="underline">
+            Yasal kabul denetimi
+          </Link>
+          <Link href="/is-ilanlari" className="underline">
+            Genel iş ilanı listesi (moderasyon sonrası kontrol)
+          </Link>
+        </nav>
+        <p className="mt-3 text-xs text-[var(--muted)]">
+          Yönetim erişimi sunucu tarafında <code>staffRole</code> ile verilir. Sahibin kayıtlı e-postası
+          için: <code>npm run bootstrap:admin -- owner@example.com</code>
         </p>
       </div>
 
-      <section className="panel">
+      <section id="profil-incelemeleri" className="panel">
         <h2 className="font-[family-name:var(--font-display)] text-xl">{ui.admin.reviews}</h2>
         {reviews.length === 0 ? (
           <p className="mt-3 text-sm text-[var(--muted)]">{ui.admin.empty}</p>
@@ -90,8 +119,7 @@ export default async function AdminPage() {
                     ) : (
                       <>
                         <p className="mt-1">
-                          Sonuç: {assist.outcome} · politika {assist.policyVersion} · adaptör{" "}
-                          {assist.providerMode}
+                          Yardımcı tarama sonucu: {assist.outcome === "CLEAR" ? "belirgin sorun yok" : assist.outcome === "NEEDS_REVIEW" ? "inceleme önerilir" : assist.outcome === "LIKELY_VIOLATION" ? "muhtemel ihlal" : assist.outcome}
                         </p>
                         <p className="mt-1">{assist.summaryForAdmin}</p>
                         {assist.reasonCodes.length ? (
@@ -136,7 +164,8 @@ export default async function AdminPage() {
       </section>
 
       {isAdmin ? (
-        <section className="panel">
+        <section id="bolumler-rss" className="panel">
+          <div id="davetler" />
           <AdminCommunityPanel
             invitations={invitations.map((i) => ({
               ...i,
@@ -145,8 +174,21 @@ export default async function AdminPage() {
             episodes={episodes}
             pendingAppearances={pendingAppearances}
           />
+          <AdminRssImportPanel
+            episodes={episodes.map((e) => ({
+              id: e.id,
+              series: e.series,
+              title: e.title,
+              publicationState: e.publicationState,
+              slug: e.slug,
+              spotifyEpisodeUrl: e.spotifyEpisodeUrl,
+              sourceKind: e.sourceKind,
+            }))}
+          />
         </section>
       ) : null}
+
+      <AdminLegalAudit />
     </div>
   );
 }

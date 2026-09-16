@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
+import { prisma } from "@/lib/db";
 import {
   adminVerifyAppearance,
   createPodcastEpisode,
@@ -25,6 +26,42 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const admin = url.searchParams.get("admin");
   const session = await getSession();
+  const q = url.searchParams.get("q") ?? undefined;
+  const page = Number(url.searchParams.get("sayfa") ?? "1");
+
+  if (url.searchParams.get("publicationVersion") === "1") {
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    const episodeId = url.searchParams.get("episodeId");
+    if (!episodeId) {
+      return NextResponse.json({ error: "episodeId_required" }, { status: 400 });
+    }
+    const episode = await prisma.podcastEpisode.findUnique({ where: { id: episodeId } });
+    if (!episode) {
+      return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+    }
+    const appearance = await prisma.episodeAppearance.findFirst({
+      where: { episodeId, memberUserId: session.user.id, status: "CONFIRMED" },
+    });
+    if (!appearance) {
+      return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+    }
+    const {
+      computeEpisodePublicationVersionId,
+      hasCurrentAcceptance,
+    } = await import("@/lib/legal/service");
+    const publicationVersionId = computeEpisodePublicationVersionId(episode);
+    const alreadyApproved = await hasCurrentAcceptance({
+      userId: session.user.id,
+      type: "PUBLICATION",
+      documentType: "PUBLICATION_APPROVAL",
+      relatedResourceType: "podcast_episode",
+      relatedResourceId: episodeId,
+      publicationVersionId,
+    });
+    return NextResponse.json({ publicationVersionId, alreadyApproved });
+  }
 
   if (admin === "1") {
     if (!session?.user?.id) {
@@ -41,8 +78,8 @@ export async function GET(request: Request) {
     }
   }
 
-  const episodes = await listPublishedEpisodes();
-  return NextResponse.json({ episodes });
+  const episodes = await listPublishedEpisodes({ page, q, pageSize: 20 });
+  return NextResponse.json(episodes);
 }
 
 export async function POST(request: Request) {

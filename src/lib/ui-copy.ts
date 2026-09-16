@@ -1,4 +1,4 @@
-/** Centralized Turkish UI copy for Milestone 1. Easy to extract later for i18n. */
+/** Centralized Turkish UI copy. Easy to extract later for i18n. */
 
 export const ui = {
   brand: "PodTest Network",
@@ -10,10 +10,14 @@ export const ui = {
     episodes: "Bölümler",
     jobs: "İş ilanları",
     employer: "İşveren",
+    employerArea: "İşveren alanı",
     profile: "Profilim",
+    account: "Hesabım",
     messages: "Mesajlar",
+    notifications: "Bildirimler",
     arayanlar: "Arayanlar",
     host: "Sunucu",
+    hostArea: "Sunucu alanı",
     admin: "Yönetim",
     signIn: "Giriş",
     signUp: "Kayıt ol",
@@ -25,7 +29,7 @@ export const ui = {
     ctaJoin: "Katıl",
     ctaBrowse: "Üyelere göz at",
     ctaArayanlar: "PodTest Arayanlar'a katıl",
-    laterNote: "Ödemeler ve Catchylabs bağlantısı yol haritasında — henüz burada değil.",
+    laterNote: "Ödemeler ve ek üyelik özellikleri yol haritasında — henüz burada değil.",
   },
   auth: {
     registerTitle: "Hesap oluştur",
@@ -46,33 +50,44 @@ export const ui = {
   },
   profile: {
     title: "Profilim",
+    tabInfo: "Profil bilgileri",
+    tabCv: "CV ile destek",
+    tabVisibility: "Görünürlük",
     visibilityTitle: "Görünürlük",
     visibilityBody:
-      "Profilin varsayılan olarak özel taslaktır. Yayımlamak için incelemeye gönderirsin; onaylanana kadar kamuya açık sayfada ve üye dizininde görünmez. Bekleyen düzenlemeler onaylı genel görünüme sızmaz.",
-    draftHint: "Bu alanlar taslağındır. Onaysız değişiklikler kamuya yansımaz.",
-    submitReview: "Yayımlamak için incelemeye gönder",
+      "Profilin varsayılan olarak özeldir. Yayımlamak için incelemeye gönderirsin; onaylanana kadar herkese açık sayfada ve üye dizininde görünmez.",
+    draftHint: "Düzenlediğin alanlar özel taslaktır. Onaylanmadan kamuya yansımaz.",
+    submitReview: "İncelemeye gönder",
+    submitDisabledPending: "İnceleme bekleniyor — yeni gönderim için sonucu bekle.",
     unpublish: "Yayımdan kaldır",
-    preview: "Önizleme",
+    previewDraft: "Taslak önizleme",
+    previewPublic: "Herkese açık görünüm",
     save: "Kaydet",
     status: "Durum",
-    manualReviewNote: "Yayın incelemesi şu an manueldir (Milestone 1).",
+    reviewNote: "Yayın incelemesi manueldir; otomatik onay yoktur.",
+    pendingWhilePublished:
+      "Herkese açık bir sürümün yayında. Bekleyen düzenlemelerin onaylanana kadar kamuya yansımaz.",
+    privateDraftHelp: "Profilin şu an özel. Hazır olduğunda incelemeye gönderebilirsin.",
     statuses: {
-      DRAFT: "Taslak",
+      DRAFT: "Özel taslak",
       PENDING_REVIEW: "İnceleme bekliyor",
-      APPROVED: "Onaylandı / yayında",
+      APPROVED: "Yayında",
       REJECTED: "Reddedildi",
       UNPUBLISHED: "Yayımdan kaldırıldı",
     },
   },
   directory: {
     title: "Üyeler",
-    empty: "Henüz keşfedilebilir, onaylı bir üye profili yok.",
+    lead: "Birlikte çalışabileceğin ve fikir alışverişi yapabileceğin insanlarla tanış.",
+    empty: "Henüz keşfedilebilir, onaylı bir üye profili yok. Filtreleri temizleyip yeniden deneyebilirsin.",
+    emptyFiltered: "Bu filtrelere uyan üye yok. Filtreleri sıfırlayıp yeniden dene.",
     filters: "Filtreler",
     skill: "Beceri",
     openToWork: "İş arıyor",
     hiring: "İşe alıyor",
     openToProjects: "Projeye açık",
     apply: "Uygula",
+    reset: "Sıfırla",
   },
   admin: {
     title: "Yönetim",
@@ -81,20 +96,34 @@ export const ui = {
     approve: "Onayla",
     reject: "Reddet",
     reason: "Red nedeni",
-    manualBanner: "Manuel moderasyon — otomatik içerik denetimi henüz yok.",
+    manualBanner: "Yayın ve rapor incelemeleri manueldir. Yardımcı taramalar yalnızca ipucu verir; otomatik onay yoktur.",
   },
   community: {
-    title: "Topluluk soruları",
-    lead: "İsteyen her üye soru sorabilir ve cevap yazabilir. CV, ilgi alanları veya genel profil zorunlu değildir. Katılım isteğe bağlıdır.",
+    title: "Topluluk",
+    lead: "Sorunu paylaş, deneyimini aktar, sohbete katıl.",
     ask: "Soru sor",
     askTitle: "Soru sor",
     askLead:
       "Önce taslak olarak saklayabilirsin. Yayımlamadan önce içeriğin ve görünen adının kamuya açık olacağını onaylaman gerekir.",
-    empty: "Henüz yayımlanmış soru yok.",
+    empty: "Henüz yayımlanmış soru yok. İlk soruyu sen sorabilirsin.",
+    moderationNearAsk:
+      "Yayımlanan içerik kural tabanlı bir kontrolden geçer; belirsiz içerik bekletilir. Bu otomatik bir yapay zekâ onay ürünü değildir.",
     episodes: "Podcast bölümleri",
-    episodesTitle: "Podcast bölümleri",
-    episodesLead:
-      "Yalnızca yönetici tarafından yayımlanmış bölümler listelenir. Dinleme bağlantıları haricidir; Spotify hesabı veya otomatik içe aktarma yoktur.",
+    episodesTitle: "Bölümler",
+    episodesLead: "PodTest sohbetlerini keşfet ve dinle.",
+  },
+  arayanlar: {
+    title: "PodTest Arayanlar",
+    lead:
+      "Kısa bir sohbetle ne yaptığını, nasıl düşündüğünü ve ne aradığını anlatırsın. Katılım isteğe bağlıdır; CV zorunlu değildir.",
+    apply: "Başvur",
+    continue: "Başvuruna devam et",
+    viewPrep: "Hazırlığını aç",
+    viewStatus: "Durumu gör",
+    restart: "Yeniden başla",
+    fromCv: "CV'mden bölüm hazırlığına başla",
+    fromCvNote:
+      "Mevcut özel CV'nden düzenlenebilir öneriler üretilir. Onaylamadan paylaşılmaz; ekstra AI kredisi alınmaz.",
   },
   hiring: {
     title: "İşveren",
@@ -104,10 +133,21 @@ export const ui = {
     applyExternal: "Harici başvuru bağlantısı",
     applyMessage: "Mesaj isteği ile iletişim",
     pilotLimitJobs: "Pilot sınırı: çalışma alanı başına bir aktif yayımlanmış ilan.",
+    createJob: "İlan oluştur",
+    createJobLead: "Taslak oluşturup inceleme veya yayım için gönderin. İlanlar sessizce otomatik onaylanmaz.",
+    noWorkspace: "İlan vermek için önce bir çalışma alanı oluşturmanız gerekir.",
+    noPilotAccess:
+      "İşveren pilot yetkisi yok. İlan oluşturma etkinleştirilmedi; yetki atlanarak düğme açılmaz.",
+    slotsExhausted:
+      "Aktif yayımlı ilan kotası dolu. Yeni ilan göndermek için mevcut yayımlı ilanı kapatın. PodTest+ yükseltmesi yakında — ödeme yok.",
+    methodExternal: "Harici HTTPS başvuru adresi",
+    methodMessaging: "Çalışma alanı üyesine mesaj isteği",
+    contactMember: "İletişim için görevli üye",
   },
   common: {
     loading: "Yükleniyor…",
     error: "Bir şeyler ters gitti.",
     comingLater: "Yakında",
+    footer: "PodTest Network · açık üyelik topluluğu",
   },
 } as const;

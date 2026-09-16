@@ -28,9 +28,6 @@ export default async function HazirligimPage() {
         </p>
       ) : (
         <article className="panel space-y-5 text-sm leading-relaxed">
-          <p className="text-xs text-[var(--muted)]">
-            Revizyon {pack.submittedRevision} · şablon {pack.editorialTemplateVersion}
-          </p>
           <section>
             <h2 className="font-[family-name:var(--font-display)] text-lg">Kayıt nasıl geçecek?</h2>
             <p className="mt-2">{pack.brief.recordingWhatToExpect}</p>

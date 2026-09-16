@@ -10,6 +10,23 @@ type SearchParams = Promise<{
   proje?: string;
 }>;
 
+function membersQuery(params: {
+  sayfa?: number;
+  beceri?: string;
+  isArıyor?: boolean;
+  iseAliyor?: boolean;
+  proje?: boolean;
+}) {
+  const q = new URLSearchParams();
+  if (params.sayfa && params.sayfa > 1) q.set("sayfa", String(params.sayfa));
+  if (params.beceri) q.set("beceri", params.beceri);
+  if (params.isArıyor) q.set("isArıyor", "1");
+  if (params.iseAliyor) q.set("iseAliyor", "1");
+  if (params.proje) q.set("proje", "1");
+  const s = q.toString();
+  return s ? `/uyeler?${s}` : "/uyeler";
+}
+
 export default async function MembersPage({
   searchParams,
 }: {
@@ -18,13 +35,18 @@ export default async function MembersPage({
   const params = await searchParams;
   const page = Number(params.sayfa ?? "1") || 1;
   const skill = params.beceri?.trim() || undefined;
+  const openToWork = params.isArıyor === "1";
+  const hiring = params.iseAliyor === "1";
+  const openToProjects = params.proje === "1";
+  const hasFilters = Boolean(skill || openToWork || hiring || openToProjects);
+
   const result = await listDirectoryProfiles({
     page,
     pageSize: 12,
     skill,
-    openToWork: params.isArıyor === "1",
-    hiring: params.iseAliyor === "1",
-    openToProjects: params.proje === "1",
+    openToWork,
+    hiring,
+    openToProjects,
   });
 
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
@@ -33,35 +55,43 @@ export default async function MembersPage({
     <div className="space-y-6">
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-3xl">{ui.directory.title}</h1>
-        <p className="mt-2 text-sm text-[var(--muted)]">
-          Yalnızca yayımlanmış, onaylanmış ve keşfedilebilir profiller listelenir.
-        </p>
+        <p className="mt-2 text-sm text-[var(--muted)]">{ui.directory.lead}</p>
       </div>
 
-      <form className="panel grid gap-3 md:grid-cols-4" method="get">
-        <div className="field md:col-span-2">
+      <form className="panel flex flex-wrap items-end gap-3" method="get">
+        <div className="field mb-0 min-w-[12rem] flex-1">
           <label htmlFor="beceri">{ui.directory.skill}</label>
           <input id="beceri" name="beceri" defaultValue={skill ?? ""} />
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="isArıyor" value="1" defaultChecked={params.isArıyor === "1"} />
-          {ui.directory.openToWork}
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="iseAliyor" value="1" defaultChecked={params.iseAliyor === "1"} />
-          {ui.directory.hiring}
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="proje" value="1" defaultChecked={params.proje === "1"} />
-          {ui.directory.openToProjects}
-        </label>
-        <button type="submit" className="btn btn-secondary md:col-span-4 md:w-fit">
+        <fieldset className="flex flex-wrap gap-3 text-sm">
+          <legend className="sr-only">{ui.directory.filters}</legend>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="isArıyor" value="1" defaultChecked={openToWork} />
+            {ui.directory.openToWork}
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="iseAliyor" value="1" defaultChecked={hiring} />
+            {ui.directory.hiring}
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="proje" value="1" defaultChecked={openToProjects} />
+            {ui.directory.openToProjects}
+          </label>
+        </fieldset>
+        <button type="submit" className="btn btn-secondary">
           {ui.directory.apply}
         </button>
+        {hasFilters ? (
+          <Link href="/uyeler" className="btn btn-ghost">
+            {ui.directory.reset}
+          </Link>
+        ) : null}
       </form>
 
       {result.items.length === 0 ? (
-        <div className="panel text-[var(--muted)]">{ui.directory.empty}</div>
+        <div className="panel text-[var(--muted)]">
+          {hasFilters ? ui.directory.emptyFiltered : ui.directory.empty}
+        </div>
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2">
           {result.items.map((member) => (
@@ -88,7 +118,16 @@ export default async function MembersPage({
       {totalPages > 1 ? (
         <div className="flex gap-3 text-sm">
           {page > 1 ? (
-            <Link href={`/uyeler?sayfa=${page - 1}`} className="text-[var(--accent-strong)]">
+            <Link
+              href={membersQuery({
+                sayfa: page - 1,
+                beceri: skill,
+                isArıyor: openToWork,
+                iseAliyor: hiring,
+                proje: openToProjects,
+              })}
+              className="text-[var(--accent-strong)] underline"
+            >
               Önceki
             </Link>
           ) : null}
@@ -96,7 +135,16 @@ export default async function MembersPage({
             Sayfa {page} / {totalPages}
           </span>
           {page < totalPages ? (
-            <Link href={`/uyeler?sayfa=${page + 1}`} className="text-[var(--accent-strong)]">
+            <Link
+              href={membersQuery({
+                sayfa: page + 1,
+                beceri: skill,
+                isArıyor: openToWork,
+                iseAliyor: hiring,
+                proje: openToProjects,
+              })}
+              className="text-[var(--accent-strong)] underline"
+            >
               Sonraki
             </Link>
           ) : null}

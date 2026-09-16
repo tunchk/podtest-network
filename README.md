@@ -8,6 +8,7 @@ Milestone 2.2 adds optional PodTest Arayanlar preparation (guest brief + assigne
 Milestone 3.1 adds message requests, conversations, blocks and reports.
 Milestone 3.2 adds community Q&A, speaker invitations, expert FAQs and podcast episode appearances.
 Milestone 3.3 adds employer workspaces, job listings and hiring member discovery (free pilot grants; no checkout).
+Admin RSS import populates the existing podcast episode catalog (no audio hosting; no PodTest+).
 
 ## Stack (verified at implementation time)
 
@@ -100,11 +101,13 @@ App: [http://localhost:3000](http://localhost:3000)
 
 ### 4. Bootstrap first admin
 
-Sign up normally in the UI, then:
+Sign up normally in the UI, then promote the **owner’s registered email** (do not guess):
 
 ```bash
 npm run bootstrap:admin -- you@example.com
 ```
+
+This sets server-owned `staffRole=ADMIN`. Signup cannot pick admin. After promotion, **Yönetim** appears in the header for that account only.
 
 Normal signup cannot choose `ADMIN` or a paid plan.
 
@@ -134,7 +137,11 @@ npm run typecheck
 npm test
 npm run build
 npm run live:verify:m22   # requires OPENAI_API_KEY + AI_PROVIDER=openai
+npm run cleanup:fixtures         # dry-run: report local verify fixtures only
+npm run cleanup:fixtures:apply   # delete only unequivocal local fixtures
 ```
+
+`cleanup:fixtures` refuses non-local databases and never truncates ledgers or episode/RSS data.
 
 ## Product UI language
 
@@ -150,5 +157,6 @@ Member-facing UI is Turkish. Engineering docs and code identifiers are English.
 - [Messaging](docs/messaging.md)
 - [Community (Q&A, invitations, FAQs, episodes)](docs/community.md)
 - [Hiring (employer workspaces, jobs, discovery)](docs/hiring.md)
+- [Podcast episodes & RSS import](docs/episodes.md)
 - [Catchylabs integration](docs/catchylabs-integration.md)
 - [Build brief](PodTest_Network_Cursor_Build_Brief.md)

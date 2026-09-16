@@ -9,11 +9,13 @@ Modular monolith (logical boundaries, single Next.js app):
 | Directory | `src/app/uyeler` |
 | Moderation (manual + assistive) | `PublicationReview`, `AutomatedContentReview`, `/yonetim` |
 | Private CV storage | `storage/private/**`, `src/lib/cv/*`, `/api/cv` |
+| In-app notifications | `InAppNotification`, `/bildirimler`, `/api/bildirimler` |
 | AI jobs | `src/lib/ai/*`, `/api/ai/profile-prepare`, `scripts/ai-worker.ts` |
 | Arayanlar preparation | `src/lib/arayanlar/*`, `/arayanlar`, `/sunucu/basvurular` |
 | Messaging | `src/lib/messaging/*`, `/mesajlar`, `/api/mesajlar/*` |
 | Community Q&A / invitations / FAQs / episodes | `src/lib/community/*`, `/topluluk`, `/bolumler`, `/davet/konusmaci`, `/api/topluluk/*`, `/api/davet/*`, `/api/bolumler`, `/api/uzman` |
 | Hiring (employer workspaces, jobs, discovery) | `src/lib/hiring/*`, `/is-ilanlari`, `/isveren/*`, `/davet/isveren`, `/api/isveren/*`, `/api/is-ilanlari` |
+| Podcast RSS import | `src/lib/podcast/*`, `/api/admin/podcast-rss`, admin panel on `/yonetim` |
 | Email verification (local mail-sink) | `src/lib/auth/email-verification.ts`, `/hesabim/eposta-dogrula` |
 | Credits ledger | `src/lib/credits/ledger.ts` |
 | Entitlements | `src/lib/capabilities/*` |
@@ -37,6 +39,8 @@ Modular monolith (logical boundaries, single Next.js app):
 - Email verification tokens are hashed; `emailVerified` is never set from a client claim.
 - Episode selectors and public APIs omit non-`PUBLISHED` episodes; appearance `adminVerifiedAt` is only set by admin paths.
 - Employer: every mutation validates workspace membership server-side; capabilities gate pilot actions separately from membership. Job listings reuse revision-bound moderation; active published job slots are enforced with advisory locks. Hiring notes and saved searches are workspace-scoped; message outreach reuses messaging quotas and blocks.
+- Staff navigation (`Yönetim`) is shown only when `staffRole` is `ADMIN` or `MODERATOR`. Grant with `npm run bootstrap:admin -- <registered-email>`.
+- CV PDF extraction uses `pdf-parse` / `pdfjs-dist` as `serverExternalPackages` so Turbopack does not break the worker; storage keys are server-generated UUIDs (client filenames are metadata only).
 
 ## AI worker
 
