@@ -35,6 +35,9 @@ export async function SiteHeader() {
           <Link href="/bolumler" className="hover:text-[var(--ink)]">
             {ui.nav.episodes}
           </Link>
+          <Link href="/is-ilanlari" className="hover:text-[var(--ink)]">
+            {ui.nav.jobs}
+          </Link>
           {session?.user ? (
             <>
               <Link href="/mesajlar" className="hover:text-[var(--ink)]">
@@ -42,6 +45,9 @@ export async function SiteHeader() {
               </Link>
               <Link href="/arayanlar" className="hover:text-[var(--ink)]">
                 {ui.nav.arayanlar}
+              </Link>
+              <Link href="/isveren" className="hover:text-[var(--ink)]">
+                {ui.nav.employer}
               </Link>
               <Link href="/hesabim/profil" className="hover:text-[var(--ink)]">
                 {ui.nav.profile}

@@ -6,7 +6,7 @@ export function ReportButton({
   targetType,
   targetId,
 }: {
-  targetType: "COMMUNITY_QUESTION" | "COMMUNITY_ANSWER" | "EXPERT_FAQ";
+  targetType: "COMMUNITY_QUESTION" | "COMMUNITY_ANSWER" | "EXPERT_FAQ" | "JOB_LISTING";
   targetId: string;
 }) {
   const [open, setOpen] = useState(false);

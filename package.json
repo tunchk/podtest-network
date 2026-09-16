@@ -17,9 +17,11 @@
     "bootstrap:admin": "tsx --env-file=.env.local scripts/bootstrap-admin.ts",
     "bootstrap:host": "tsx --env-file=.env.local scripts/bootstrap-host.ts",
     "seed:capability": "tsx --env-file=.env.local scripts/seed-capability.ts",
+    "seed:hiring-pilot": "tsx --env-file=.env.local scripts/seed-hiring-pilot.ts",
     "worker": "tsx scripts/ai-worker.ts",
     "worker:once": "tsx scripts/ai-worker.ts --once",
-    "live:verify:m22": "tsx --env-file=.env.local scripts/live-verify-m22.ts"
+    "live:verify:m22": "tsx --env-file=.env.local scripts/live-verify-m22.ts",
+    "live:verify:m33": "tsx --env-file=.env.local scripts/live-verify-m33.ts"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "^1.7.5",

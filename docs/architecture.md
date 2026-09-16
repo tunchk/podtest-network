@@ -13,6 +13,7 @@ Modular monolith (logical boundaries, single Next.js app):
 | Arayanlar preparation | `src/lib/arayanlar/*`, `/arayanlar`, `/sunucu/basvurular` |
 | Messaging | `src/lib/messaging/*`, `/mesajlar`, `/api/mesajlar/*` |
 | Community Q&A / invitations / FAQs / episodes | `src/lib/community/*`, `/topluluk`, `/bolumler`, `/davet/konusmaci`, `/api/topluluk/*`, `/api/davet/*`, `/api/bolumler`, `/api/uzman` |
+| Hiring (employer workspaces, jobs, discovery) | `src/lib/hiring/*`, `/is-ilanlari`, `/isveren/*`, `/davet/isveren`, `/api/isveren/*`, `/api/is-ilanlari` |
 | Email verification (local mail-sink) | `src/lib/auth/email-verification.ts`, `/hesabim/eposta-dogrula` |
 | Credits ledger | `src/lib/credits/ledger.ts` |
 | Entitlements | `src/lib/capabilities/*` |
@@ -35,6 +36,7 @@ Modular monolith (logical boundaries, single Next.js app):
 - Community Q&A reuses messaging blocks + report queue; speaker invitations are ADMIN-only and never grant staff/host privileges.
 - Email verification tokens are hashed; `emailVerified` is never set from a client claim.
 - Episode selectors and public APIs omit non-`PUBLISHED` episodes; appearance `adminVerifiedAt` is only set by admin paths.
+- Employer: every mutation validates workspace membership server-side; capabilities gate pilot actions separately from membership. Job listings reuse revision-bound moderation; active published job slots are enforced with advisory locks. Hiring notes and saved searches are workspace-scoped; message outreach reuses messaging quotas and blocks.
 
 ## AI worker
 

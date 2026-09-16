@@ -10,7 +10,10 @@ export type CapabilityKey =
   | "ai.profile.prepare"
   | "ai.arayanlar.prepare"
   | "network.message_request.create"
+  | "hiring.workspace.create"
   | "hiring.search.advanced"
+  | "hiring.search.save"
+  | "hiring.candidate_list.manage"
   | "hiring.job.publish"
   | "content.premium.access"
   | "events.member_discount"
@@ -51,9 +54,27 @@ export const CAPABILITY_CATALOG: Record<CapabilityKey, CapabilityDefinition> = {
     monthlyQuotaHint: 5,
     milestone: "M3",
   },
+  "hiring.workspace.create": {
+    key: "hiring.workspace.create",
+    description: "Create an employer workspace (pilot grant, not a subscription)",
+    plans: ["EMPLOYER"],
+    milestone: "M3",
+  },
   "hiring.search.advanced": {
     key: "hiring.search.advanced",
-    description: "Advanced hiring filters and saved searches",
+    description: "Advanced hiring filters and candidate search",
+    plans: ["EMPLOYER"],
+    milestone: "M3",
+  },
+  "hiring.search.save": {
+    key: "hiring.search.save",
+    description: "Save and reopen hiring searches",
+    plans: ["EMPLOYER"],
+    milestone: "M3",
+  },
+  "hiring.candidate_list.manage": {
+    key: "hiring.candidate_list.manage",
+    description: "Manage private candidate lists and notes",
     plans: ["EMPLOYER"],
     milestone: "M3",
   },
@@ -61,7 +82,7 @@ export const CAPABILITY_CATALOG: Record<CapabilityKey, CapabilityDefinition> = {
     key: "hiring.job.publish",
     description: "Publish employer job postings",
     plans: ["EMPLOYER"],
-    milestone: "M4",
+    milestone: "M3",
   },
   "content.premium.access": {
     key: "content.premium.access",

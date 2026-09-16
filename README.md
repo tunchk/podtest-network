@@ -7,6 +7,7 @@ Milestone 2.1 adds optional CV → AI profile suggestions, a durable worker, spo
 Milestone 2.2 adds optional PodTest Arayanlar preparation (guest brief + assigned-host pack).
 Milestone 3.1 adds message requests, conversations, blocks and reports.
 Milestone 3.2 adds community Q&A, speaker invitations, expert FAQs and podcast episode appearances.
+Milestone 3.3 adds employer workspaces, job listings and hiring member discovery (free pilot grants; no checkout).
 
 ## Stack (verified at implementation time)
 
@@ -78,6 +79,7 @@ Environment variable **names** used:
 - `COMMUNITY_QUESTION_TITLE_MAX` / `COMMUNITY_QUESTION_BODY_MAX` / `COMMUNITY_ANSWER_BODY_MAX`
 - `COMMUNITY_QUESTIONS_PER_DAY` / `COMMUNITY_ANSWERS_PER_DAY`
 - `SPEAKER_INVITATION_TTL_HOURS` / `EMAIL_VERIFICATION_TTL_HOURS`
+- `HIRING_WORKSPACES_PER_MEMBER` / `HIRING_ACTIVE_JOBS_PER_WORKSPACE` / `HIRING_SAVED_SEARCHES_MAX` / `HIRING_CANDIDATE_LISTS_MAX` / `HIRING_CANDIDATE_LIST_ENTRIES_MAX` / `HIRING_INVITATION_TTL_HOURS`
 - `DEV_WEB_PORT` (optional; `scripts/dev.ts` also accepts `-p` / `--port`)
 - `AI_WORKER_POLL_MS`
 
@@ -122,6 +124,7 @@ Then an admin assigns applications at `/sunucu/basvurular` or via `POST /api/adm
 
 ```bash
 npm run seed:capability -- you@example.com ai.profile.prepare
+npm run seed:hiring-pilot -- you@example.com   # M3.3 promotional pilot grants
 ```
 
 ## Verification
@@ -146,5 +149,6 @@ Member-facing UI is Turkish. Engineering docs and code identifiers are English.
 - [Arayanlar preparation](docs/arayanlar.md)
 - [Messaging](docs/messaging.md)
 - [Community (Q&A, invitations, FAQs, episodes)](docs/community.md)
+- [Hiring (employer workspaces, jobs, discovery)](docs/hiring.md)
 - [Catchylabs integration](docs/catchylabs-integration.md)
 - [Build brief](PodTest_Network_Cursor_Build_Brief.md)

@@ -8,6 +8,8 @@ export const ui = {
     members: "Üyeler",
     community: "Topluluk",
     episodes: "Bölümler",
+    jobs: "İş ilanları",
+    employer: "İşveren",
     profile: "Profilim",
     messages: "Mesajlar",
     arayanlar: "Arayanlar",
@@ -93,6 +95,15 @@ export const ui = {
     episodesTitle: "Podcast bölümleri",
     episodesLead:
       "Yalnızca yönetici tarafından yayımlanmış bölümler listelenir. Dinleme bağlantıları haricidir; Spotify hesabı veya otomatik içe aktarma yoktur.",
+  },
+  hiring: {
+    title: "İşveren",
+    lead: "Gönüllü yayımlanmış profiller üzerinde arama yapın, ilan verin ve aday listelerini yönetin. İletişim mevcut mesaj isteği sistemiyle ve adayın onayıyla ilerler.",
+    jobsPublic: "İş ilanları",
+    jobsPublicLead: "Yalnızca yayımlanmış ve süresi dolmamış ilanlar listelenir.",
+    applyExternal: "Harici başvuru bağlantısı",
+    applyMessage: "Mesaj isteği ile iletişim",
+    pilotLimitJobs: "Pilot sınırı: çalışma alanı başına bir aktif yayımlanmış ilan.",
   },
   common: {
     loading: "Yükleniyor…",

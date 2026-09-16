@@ -155,6 +155,16 @@ model User {
   targetedQuestionsReceived TargetedExpertQuestion[] @relation("TargetedQuestionExpert")
   inAppNotifications      InAppNotification[]
 
+  employerWorkspacesOwned EmployerWorkspace[] @relation("EmployerWorkspaceOwner")
+  employerMemberships     EmployerWorkspaceMember[]
+  employerInvitationsSent EmployerMembershipInvitation[] @relation("EmployerInviteCreator")
+  employerInvitationsUsed EmployerMembershipInvitation[] @relation("EmployerInviteConsumer")
+  jobListingsAsContact    JobListing[] @relation("JobListingContact")
+  hiringSavedSearches     HiringSavedSearch[]
+  hiringCandidateLists    HiringCandidateList[]
+  hiringCandidateNotes    HiringCandidateNote[] @relation("HiringNoteAuthor")
+  hiringNotesAbout        HiringCandidateNote[] @relation("HiringNoteSubject")
+
   @@map("user")
 }
 
@@ -530,6 +540,7 @@ enum ReportTargetType {
   COMMUNITY_QUESTION
   COMMUNITY_ANSWER
   EXPERT_FAQ
+  JOB_LISTING
 }
 
 enum ReportStatus {
@@ -550,6 +561,7 @@ enum ModerationHoldKind {
   COMMUNITY_QUESTION
   COMMUNITY_ANSWER
   EXPERT_FAQ
+  JOB_LISTING
 }
 
 enum ModerationHoldStatus {
@@ -1113,4 +1125,235 @@ model InAppNotification {
 
   @@index([userId, readAt, createdAt])
   @@map("in_app_notification")
+}
+
+// ---------------------------------------------------------------------------
+// Milestone 3.3 — Employer workspaces, job listings, hiring discovery
+// ---------------------------------------------------------------------------
+
+enum EmployerWorkspaceStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum EmployerWorkspaceRole {
+  OWNER
+  RECRUITER
+}
+
+enum EmployerWorkspaceMemberStatus {
+  ACTIVE
+  REMOVED
+}
+
+enum JobListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  REJECTED
+  CLOSED
+  REMOVED
+}
+
+enum JobRemoteType {
+  REMOTE
+  HYBRID
+  ON_SITE
+  UNSPECIFIED
+}
+
+enum JobEmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERNSHIP
+}
+
+enum JobApplicationMethod {
+  EXTERNAL_URL
+  MESSAGING
+}
+
+enum JobSalaryPeriod {
+  HOURLY
+  MONTHLY
+  YEARLY
+}
+
+model EmployerWorkspace {
+  id          String                  @id @default(cuid())
+  name        String
+  description String?
+  website     String?
+  status      EmployerWorkspaceStatus @default(ACTIVE)
+  ownerId     String
+  owner       User                    @relation("EmployerWorkspaceOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+
+  members     EmployerWorkspaceMember[]
+  invitations EmployerMembershipInvitation[]
+  jobs        JobListing[]
+  savedSearches HiringSavedSearch[]
+  candidateLists HiringCandidateList[]
+  candidateNotes HiringCandidateNote[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@map("employer_workspace")
+}
+
+model EmployerWorkspaceMember {
+  id          String                        @id @default(cuid())
+  workspaceId String
+  workspace   EmployerWorkspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        EmployerWorkspaceRole
+  status      EmployerWorkspaceMemberStatus @default(ACTIVE)
+  removedAt   DateTime?
+  createdAt   DateTime                      @default(now())
+  updatedAt   DateTime                      @updatedAt
+
+  @@unique([workspaceId, userId])
+  @@index([userId, status])
+  @@map("employer_workspace_member")
+}
+
+model EmployerMembershipInvitation {
+  id             String                @id @default(cuid())
+  workspaceId    String
+  workspace      EmployerWorkspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdById    String
+  createdBy      User                  @relation("EmployerInviteCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  recipientEmail String?
+  role           EmployerWorkspaceRole @default(RECRUITER)
+  tokenHash      String                @unique
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  consumedAt     DateTime?
+  consumedById   String?
+  consumedBy     User?                 @relation("EmployerInviteConsumer", fields: [consumedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime              @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@map("employer_membership_invitation")
+}
+
+model JobListing {
+  id              String               @id @default(cuid())
+  workspaceId     String
+  workspace       EmployerWorkspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  slug            String               @unique
+  title           String
+  description     String
+  responsibilities String?
+  skills          String[]             @default([])
+  location        String?
+  remoteType      JobRemoteType        @default(UNSPECIFIED)
+  employmentType  JobEmploymentType    @default(FULL_TIME)
+  salaryMin       Int?
+  salaryMax       Int?
+  salaryCurrency  String?
+  salaryPeriod    JobSalaryPeriod?
+  applicationMethod JobApplicationMethod
+  applicationUrl  String?
+  contactUserId   String?
+  contactUser     User?                @relation("JobListingContact", fields: [contactUserId], references: [id], onDelete: SetNull)
+  closingDate     DateTime?
+  status          JobListingStatus     @default(DRAFT)
+  publishedRevision Int?
+  currentRevision   Int                @default(0)
+  moderationReason  String?
+  moderationPolicyVersion String?
+  moderationAdapter     String?
+  publishedAt     DateTime?
+  closedAt        DateTime?
+  removedAt       DateTime?
+  createdById     String
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  revisions JobListingRevision[]
+
+  @@index([workspaceId, status])
+  @@index([status, publishedAt])
+  @@map("job_listing")
+}
+
+model JobListingRevision {
+  id           String     @id @default(cuid())
+  jobId        String
+  job          JobListing @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  revision     Int
+  payload      Json
+  classificationOutcome String?
+  classificationReason  String?
+  moderationDecision    String?
+  createdAt    DateTime   @default(now())
+
+  @@unique([jobId, revision])
+  @@map("job_listing_revision")
+}
+
+model HiringSavedSearch {
+  id          String            @id @default(cuid())
+  workspaceId String
+  workspace   EmployerWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  filters     Json
+  createdById String
+  createdBy   User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([workspaceId, createdAt])
+  @@map("hiring_saved_search")
+}
+
+model HiringCandidateList {
+  id          String            @id @default(cuid())
+  workspaceId String
+  workspace   EmployerWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  createdById String
+  createdBy   User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  entries HiringCandidateListEntry[]
+
+  @@index([workspaceId, createdAt])
+  @@map("hiring_candidate_list")
+}
+
+model HiringCandidateListEntry {
+  id          String              @id @default(cuid())
+  listId      String
+  list        HiringCandidateList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  subjectUserId String
+  addedById   String
+  createdAt   DateTime            @default(now())
+
+  @@unique([listId, subjectUserId])
+  @@index([subjectUserId])
+  @@map("hiring_candidate_list_entry")
+}
+
+model HiringCandidateNote {
+  id            String            @id @default(cuid())
+  workspaceId   String
+  workspace     EmployerWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  subjectUserId String
+  subject       User              @relation("HiringNoteSubject", fields: [subjectUserId], references: [id], onDelete: Cascade)
+  authorId      String
+  author        User              @relation("HiringNoteAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  body          String
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([workspaceId, subjectUserId])
+  @@index([authorId, createdAt])
+  @@map("hiring_candidate_note")
 }

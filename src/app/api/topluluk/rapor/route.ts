@@ -20,6 +20,7 @@ export async function POST(request: Request) {
     "COMMUNITY_QUESTION",
     "COMMUNITY_ANSWER",
     "EXPERT_FAQ",
+    "JOB_LISTING",
     "PROFILE",
     "MESSAGE",
     "MESSAGE_REQUEST",

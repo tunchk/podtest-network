@@ -153,6 +153,21 @@ async function assertCanReportTarget(options: {
     };
   }
 
+  if (options.targetType === "JOB_LISTING") {
+    const job = await prisma.jobListing.findUnique({ where: { id: options.targetId } });
+    if (!job || job.status !== "PUBLISHED") fail("NOT_FOUND");
+    return {
+      evidenceSnapshot: {
+        targetType: "JOB_LISTING",
+        jobId: job.id,
+        slug: job.slug,
+        titlePreview: job.title.slice(0, 160),
+        workspaceId: job.workspaceId,
+      },
+      canonicalId: job.id,
+    };
+  }
+
   fail("INVALID_TARGET");
 }
 
@@ -310,6 +325,11 @@ export async function removeReportedContent(options: {
         where: { id: modCase.report.targetId },
         data: { status: "REMOVED", removedAt: new Date(), publishedAt: null },
       });
+    } else if (modCase.report.targetType === "JOB_LISTING") {
+      await tx.jobListing.updateMany({
+        where: { id: modCase.report.targetId },
+        data: { status: "REMOVED", removedAt: new Date() },
+      });
     }
 
     await tx.moderationCase.update({
@@ -374,6 +394,7 @@ export async function releaseModerationHold(options: {
     questionId?: string;
     answerId?: string;
     faqId?: string;
+    jobId?: string;
     revision?: number;
     title?: string;
   };
@@ -415,6 +436,17 @@ export async function releaseModerationHold(options: {
       data: { status: "RELEASED", resolvedAt: new Date() },
     });
     return { kind: "expert_faq" as const, faqId: payload.faqId };
+  }
+
+  if (hold.kind === "JOB_LISTING") {
+    if (!payload.jobId || payload.revision == null) fail("INVALID_HOLD");
+    const { publishHeldJobRevision } = await import("@/lib/hiring/jobs");
+    await publishHeldJobRevision({ jobId: payload.jobId, revision: payload.revision });
+    await prisma.moderationHold.update({
+      where: { id: hold.id },
+      data: { status: "RELEASED", resolvedAt: new Date() },
+    });
+    return { kind: "job_listing" as const, jobId: payload.jobId };
   }
 
   if (hold.kind === "MESSAGE") {

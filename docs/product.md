@@ -40,10 +40,18 @@ PodTest Network is an open community. Anyone can join. Membership does not requi
 - Participation remains optional; no CV/interests/public profile required to ask or answer.
 - Email verification uses a local mail-sink (no real outbound mail). Invitation tokens are hashed; plaintext is copy-once for admins.
 
+## Milestone 3.3 behavior
+
+- Employer workspaces, job listings (`/is-ilanlari`), and hiring discovery for workspace members (`/isveren/*`).
+- **PodTest+ is coming soon.** Monetization infrastructure (capabilities, grants) remains prepared; subscriptions, checkout, and credit sales are **not** shipped in this milestone. UI may show informational “PodTest+ yakında” copy only.
+- Employer pilot access uses promotional grants (`hiring_pilot_v1`), not paid EMPLOYER subscriptions.
+- Workspace creation does not require a public profile or CV. `HIRING` profile status does not grant workspace admin access.
+- Candidate outreach uses existing message requests (sender quota, blocks, contact preferences). No ATS or in-app applications.
+- See `docs/hiring.md`.
+
 ## Explicitly not implemented yet
 
-- Advanced employer search, job listings
-- PodTest+ / Employer billing, credit sales, subscriptions
+- PodTest+ / Employer billing, credit sales, subscriptions (checkout deferred)
 - Live Catchylabs provisioning
 - Webinars / video conferencing
 - Spotify account integration, audio hosting, automatic episode imports
