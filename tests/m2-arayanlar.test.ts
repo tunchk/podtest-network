@@ -177,6 +177,68 @@ describe("m2.2 arayanlar preparation", () => {
     expect(app.questionsAsked).toBeGreaterThanOrEqual(2);
   });
 
+  it("blocks confirm without host-sharing acceptance; upsert+accept then submit works", async () => {
+    // Isolate from earlier SUBMITTED state by using a fresh user.
+    const user = await createUser("m22-legal-host");
+    ids.push(user.id);
+    await getOrCreateApplication(user.id);
+    await confirmCostAndStart(user.id);
+    await switchToSummaryFallback(user.id, {
+      targetRole: "QA",
+      storyTopic: "test",
+      contribution: "test",
+      workPreferences: "remote",
+      excludedTopics: "yok",
+      contactChannel: "mesaj",
+    });
+
+    const facts: SubmittedFacts = {
+      displayName: "m22-legal-host",
+      targetRole: "QA",
+      storyTopic: "test",
+      contribution: "test",
+      workPreferences: "remote",
+      excludedTopics: "yok",
+      contactChannel: "mesaj",
+      profileHintsUsed: [],
+    };
+
+    await expect(submitApplication({ userId: user.id, facts })).rejects.toThrow(
+      "LEGAL_HOST_PREP_REQUIRED",
+    );
+
+    // Regression: LegalDocument.upsert must work through @/lib/db (not only a raw PrismaClient).
+    const { prisma } = await import("@/lib/db");
+    expect(typeof (prisma as { legalDocument?: { upsert?: unknown } }).legalDocument?.upsert).toBe(
+      "function",
+    );
+    const { ensureLegalDocumentsSeeded, recordAcceptance, hasCurrentAcceptance } =
+      await import("@/lib/legal/service");
+    await ensureLegalDocumentsSeeded();
+
+    const app = await db.arayanlarApplication.findUniqueOrThrow({ where: { userId: user.id } });
+    await recordAcceptance({
+      userId: user.id,
+      type: "HOST_PREP_SHARING",
+      documentType: "HOST_PREP_SHARING_NOTICE",
+      scope: "arayanlar_submit",
+      relatedResourceType: "arayanlar_application",
+      relatedResourceId: app.id,
+    });
+    expect(
+      await hasCurrentAcceptance({
+        userId: user.id,
+        type: "HOST_PREP_SHARING",
+        documentType: "HOST_PREP_SHARING_NOTICE",
+        relatedResourceType: "arayanlar_application",
+        relatedResourceId: app.id,
+      }),
+    ).toBe(true);
+
+    const { jobId } = await submitApplication({ userId: user.id, facts });
+    expect(jobId).toBeTruthy();
+  });
+
   it("summary fallback and explicit submit produce both artifacts atomically", async () => {
     await switchToSummaryFallback(guestId, {
       targetRole: "QA Lead",
