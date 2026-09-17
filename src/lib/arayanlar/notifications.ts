@@ -9,6 +9,9 @@ export const ARAYANLAR_NOTIF = {
   recordingScheduled: "arayanlar_recording_scheduled",
   recordingRescheduled: "arayanlar_recording_rescheduled",
   recordingScheduleCancelled: "arayanlar_recording_schedule_cancelled",
+  publicationApprovalRequested: "arayanlar_publication_approval_requested",
+  publicationChangeRequested: "arayanlar_publication_change_requested",
+  published: "arayanlar_published",
 } as const;
 
 function revisionKey(eventKey: string, applicationId: string, revision: number) {
@@ -176,6 +179,85 @@ export async function notifyArayanlarRecordingScheduleCancelled(options: {
       ARAYANLAR_NOTIF.recordingScheduleCancelled,
       options.applicationId,
       options.scheduleVersion,
+    ),
+  });
+}
+
+function publicationVersionKey(
+  eventKey: string,
+  applicationId: string,
+  publicationVersionId: string,
+) {
+  return `${eventKey}:${applicationId}:pv:${publicationVersionId}`;
+}
+
+export async function notifyArayanlarPublicationApprovalRequested(options: {
+  userId: string;
+  applicationId: string;
+  publicationVersionId: string;
+}) {
+  return createNotification({
+    userId: options.userId,
+    kind: ARAYANLAR_NOTIF.publicationApprovalRequested,
+    title: "Kariyer Portresi yayın onayın bekleniyor",
+    body: "Yayınlanacak bölümü kontrol edip onaylayabilirsin.",
+    href: "/arayanlar/basvurum",
+    payload: {
+      applicationId: options.applicationId,
+      publicationVersionId: options.publicationVersionId,
+    },
+    dedupeKey: publicationVersionKey(
+      ARAYANLAR_NOTIF.publicationApprovalRequested,
+      options.applicationId,
+      options.publicationVersionId,
+    ),
+  });
+}
+
+export async function notifyArayanlarPublicationChangeRequested(options: {
+  hostUserId: string;
+  applicationId: string;
+  publicationVersionId: string;
+}) {
+  return createNotification({
+    userId: options.hostUserId,
+    kind: ARAYANLAR_NOTIF.publicationChangeRequested,
+    title: "Kariyer Portresi değişiklik talebi",
+    body: "Aday yayın sürümü için değişiklik istedi. Başvuru detayında görebilirsin.",
+    href: `/sunucu/basvurular/${options.applicationId}`,
+    payload: {
+      applicationId: options.applicationId,
+      publicationVersionId: options.publicationVersionId,
+    },
+    dedupeKey: publicationVersionKey(
+      ARAYANLAR_NOTIF.publicationChangeRequested,
+      options.applicationId,
+      options.publicationVersionId,
+    ),
+  });
+}
+
+export async function notifyArayanlarPublished(options: {
+  userId: string;
+  applicationId: string;
+  episodeId: string;
+  publicationVersionId: string;
+}) {
+  return createNotification({
+    userId: options.userId,
+    kind: ARAYANLAR_NOTIF.published,
+    title: "Kariyer Portresi yayında",
+    body: "Bölümün yayınlandı.",
+    href: "/arayanlar/basvurum",
+    payload: {
+      applicationId: options.applicationId,
+      episodeId: options.episodeId,
+      publicationVersionId: options.publicationVersionId,
+    },
+    dedupeKey: publicationVersionKey(
+      ARAYANLAR_NOTIF.published,
+      options.applicationId,
+      options.publicationVersionId,
     ),
   });
 }

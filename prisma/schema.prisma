@@ -508,6 +508,15 @@ model ArayanlarApplication {
   recordingScheduleVersion   Int       @default(0)
   recordingCompletedAt       DateTime?
 
+  /// Linked draft/public PodcastEpisode for Kariyer Portresi publication review.
+  publicationEpisodeId           String?
+  publicationEpisode             PodcastEpisode? @relation(fields: [publicationEpisodeId], references: [id], onDelete: SetNull)
+  /// When set, candidate may review/approve this exact publicationVersionId.
+  publicationReviewRequestedAt   DateTime?
+  publicationReviewVersionId     String?
+  publicationChangeRequestNote   String?
+  publicationChangeRequestedAt   DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -517,6 +526,7 @@ model ArayanlarApplication {
   @@index([status, createdAt])
   @@index([assignedHostUserId])
   @@index([recordingScheduledAt])
+  @@index([publicationEpisodeId])
   @@map("arayanlar_application")
 }
 
@@ -1107,6 +1117,7 @@ model PodcastEpisode {
   appearances  EpisodeAppearance[]
   invitations  SpeakerInvitation[]
   questions    CommunityQuestion[]
+  arayanlarApplications ArayanlarApplication[]
 
   @@unique([feedConfigId, rssGuid])
   @@index([publicationState, publicationDate])

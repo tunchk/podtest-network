@@ -7,6 +7,8 @@ import {
 } from "@/lib/arayanlar/presentation";
 import { toRecordingScheduleView } from "@/lib/arayanlar/recording-schedule";
 import { CandidateRecordingSchedule } from "@/components/arayanlar/candidate-recording-schedule";
+import { CandidatePublicationPanel } from "@/components/arayanlar/candidate-publication-panel";
+import { getKariyerPublicationCandidateState } from "@/lib/arayanlar/publication";
 
 export default async function BasvurumPage() {
   const session = await requireSession();
@@ -32,6 +34,21 @@ export default async function BasvurumPage() {
 
   const schedule = app ? toRecordingScheduleView(app) : null;
   const prepReady = facing === "READY";
+  const publication = app
+    ? await getKariyerPublicationCandidateState({
+        candidateUserId: session.user.id,
+        applicationId: app.id,
+      })
+    : { kind: "none" as const };
+
+  const showPublication =
+    publication.kind === "published" ||
+    publication.kind === "approval_requested" ||
+    publication.kind === "change_requested";
+
+  // Priority: published / publication review > schedule > prep
+  const showSchedule =
+    !showPublication && schedule != null && (prepReady || schedule.scheduled);
 
   return (
     <section className="space-y-6">
@@ -47,14 +64,23 @@ export default async function BasvurumPage() {
         <>
           <div className="panel space-y-3 text-sm">
             <p>
-              Durum: <strong>{userFacingStateLabel(facing)}</strong>
+              Durum:{" "}
+              <strong>
+                {publication.kind === "published"
+                  ? "Kariyer Portresi yayında"
+                  : publication.kind === "approval_requested"
+                    ? "Yayın onayın bekleniyor"
+                    : publication.kind === "change_requested"
+                      ? "Değişiklik talebin iletildi"
+                      : userFacingStateLabel(facing)}
+              </strong>
             </p>
             <p className="text-[var(--muted)]">
               Bu başvuru davet veya kesin kayıt tarihi değildir. Geri çekme sonrası host erişimi
               kaldırılır; daha önce indirilmiş dosyalar geri alınamayabilir.
             </p>
             <div className="flex flex-wrap gap-2">
-              {facing === "READY" ? (
+              {facing === "READY" && publication.kind !== "published" ? (
                 <Link href="/arayanlar/hazirligim" className="btn btn-primary inline-flex">
                   Notlarımı aç
                 </Link>
@@ -71,7 +97,30 @@ export default async function BasvurumPage() {
               </Link>
             </div>
           </div>
-          {schedule ? (
+
+          {publication.kind === "published" ? (
+            <CandidatePublicationPanel
+              mode="published"
+              preview={publication.preview}
+              publicUrl={publication.publicUrl}
+            />
+          ) : null}
+          {publication.kind === "approval_requested" ? (
+            <CandidatePublicationPanel
+              mode="approval_requested"
+              preview={publication.preview}
+              alreadyApproved={publication.alreadyApproved}
+            />
+          ) : null}
+          {publication.kind === "change_requested" ? (
+            <CandidatePublicationPanel
+              mode="change_requested"
+              preview={publication.preview}
+              changeNote={publication.changeNote}
+            />
+          ) : null}
+
+          {showSchedule && schedule ? (
             <CandidateRecordingSchedule schedule={schedule} prepReady={prepReady} />
           ) : null}
         </>

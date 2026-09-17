@@ -4,11 +4,13 @@ import { requireSession } from "@/lib/session";
 import { getHostPackForAssignedHost } from "@/lib/arayanlar/service";
 import { HostPrepReadonly } from "@/components/arayanlar/host-prep-readonly";
 import { HostRecordingScheduleForm } from "@/components/arayanlar/host-recording-schedule-form";
+import { HostPublicationPanel } from "@/components/arayanlar/host-publication-panel";
 import { toRecordingScheduleView } from "@/lib/arayanlar/recording-schedule";
 import {
   DEFAULT_RECORDING_TIMEZONE,
   wallPartsFromUtc,
 } from "@/lib/arayanlar/recording-time";
+import { getHostPublicationPanelInitial } from "@/lib/arayanlar/publication-host";
 import type { SubmittedFacts } from "@/lib/arayanlar/constants";
 
 type Props = { params: Promise<{ id: string }> };
@@ -36,6 +38,7 @@ export default async function SunucuBasvuruNotlarPage({ params }: Props) {
     schedule.scheduledAt != null
       ? wallPartsFromUtc(schedule.scheduledAt, tz)
       : { date: "", time: "" };
+  const publicationInitial = await getHostPublicationPanelInitial(id);
 
   return (
     <section className="space-y-6">
@@ -76,6 +79,10 @@ export default async function SunucuBasvuruNotlarPage({ params }: Props) {
           timeValue: wall.time,
         }}
       />
+
+      {publicationInitial ? (
+        <HostPublicationPanel applicationId={id} initial={publicationInitial} />
+      ) : null}
 
       <HostPrepReadonly pack={result.effective} />
     </section>
