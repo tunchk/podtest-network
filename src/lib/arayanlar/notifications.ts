@@ -6,10 +6,17 @@ export const ARAYANLAR_NOTIF = {
   prepReady: "arayanlar_prep_ready",
   prepFailedRetryable: "arayanlar_prep_failed_retryable",
   withdrawn: "arayanlar_application_withdrawn",
+  recordingScheduled: "arayanlar_recording_scheduled",
+  recordingRescheduled: "arayanlar_recording_rescheduled",
+  recordingScheduleCancelled: "arayanlar_recording_schedule_cancelled",
 } as const;
 
 function revisionKey(eventKey: string, applicationId: string, revision: number) {
   return `${eventKey}:${applicationId}:r${revision}`;
+}
+
+function scheduleKey(eventKey: string, applicationId: string, scheduleVersion: number) {
+  return `${eventKey}:${applicationId}:v${scheduleVersion}`;
 }
 
 /** Actual submit transition only — never from GET/poll. */
@@ -101,5 +108,74 @@ export async function notifyArayanlarApplicationWithdrawn(options: {
       submittedRevision: options.revision,
     },
     dedupeKey: revisionKey(ARAYANLAR_NOTIF.withdrawn, options.applicationId, options.revision),
+  });
+}
+
+export async function notifyArayanlarRecordingScheduled(options: {
+  userId: string;
+  applicationId: string;
+  scheduleVersion: number;
+}) {
+  return createNotification({
+    userId: options.userId,
+    kind: ARAYANLAR_NOTIF.recordingScheduled,
+    title: "Kariyer Portresi kayıt zamanı belirlendi",
+    body: "Kayıt zamanın belirlendi. Detayları başvurunda görebilirsin.",
+    href: "/arayanlar/basvurum",
+    payload: {
+      applicationId: options.applicationId,
+      scheduleVersion: options.scheduleVersion,
+    },
+    dedupeKey: scheduleKey(
+      ARAYANLAR_NOTIF.recordingScheduled,
+      options.applicationId,
+      options.scheduleVersion,
+    ),
+  });
+}
+
+export async function notifyArayanlarRecordingRescheduled(options: {
+  userId: string;
+  applicationId: string;
+  scheduleVersion: number;
+}) {
+  return createNotification({
+    userId: options.userId,
+    kind: ARAYANLAR_NOTIF.recordingRescheduled,
+    title: "Kariyer Portresi kayıt zamanın güncellendi",
+    body: "Kayıt zamanın değişti. Güncel detayları başvurunda görebilirsin.",
+    href: "/arayanlar/basvurum",
+    payload: {
+      applicationId: options.applicationId,
+      scheduleVersion: options.scheduleVersion,
+    },
+    dedupeKey: scheduleKey(
+      ARAYANLAR_NOTIF.recordingRescheduled,
+      options.applicationId,
+      options.scheduleVersion,
+    ),
+  });
+}
+
+export async function notifyArayanlarRecordingScheduleCancelled(options: {
+  userId: string;
+  applicationId: string;
+  scheduleVersion: number;
+}) {
+  return createNotification({
+    userId: options.userId,
+    kind: ARAYANLAR_NOTIF.recordingScheduleCancelled,
+    title: "Kariyer Portresi kayıt planı güncellendi",
+    body: "Planlanan kayıt zamanı kaldırıldı. Yeni zaman belirlendiğinde sana haber vereceğiz.",
+    href: "/arayanlar/basvurum",
+    payload: {
+      applicationId: options.applicationId,
+      scheduleVersion: options.scheduleVersion,
+    },
+    dedupeKey: scheduleKey(
+      ARAYANLAR_NOTIF.recordingScheduleCancelled,
+      options.applicationId,
+      options.scheduleVersion,
+    ),
   });
 }

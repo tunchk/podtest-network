@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireSession } from "@/lib/session";
 import { getHostPackForAssignedHost } from "@/lib/arayanlar/service";
-import { HostPackEditor } from "@/components/arayanlar/host-pack-editor";
+import { HostPrepReadonly } from "@/components/arayanlar/host-prep-readonly";
 import { HostRecordingScheduleForm } from "@/components/arayanlar/host-recording-schedule-form";
 import { toRecordingScheduleView } from "@/lib/arayanlar/recording-schedule";
 import {
@@ -13,7 +13,11 @@ import type { SubmittedFacts } from "@/lib/arayanlar/constants";
 
 type Props = { params: Promise<{ id: string }> };
 
-export default async function SunucuBasvuruDetailPage({ params }: Props) {
+/**
+ * Host-safe read-only producer notes for recording.
+ * No raw CV. No guest-only route. No second AI generation.
+ */
+export default async function SunucuBasvuruNotlarPage({ params }: Props) {
   const session = await requireSession();
   const { id } = await params;
   const result = await getHostPackForAssignedHost({
@@ -37,15 +41,14 @@ export default async function SunucuBasvuruDetailPage({ params }: Props) {
     <section className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-[family-name:var(--font-display)] text-3xl">Yapımcı notları</h1>
+          <h1 className="font-[family-name:var(--font-display)] text-3xl">Kayıt notları</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            Üye onaylı gerçekler değiştirilemez. Düzenlemelerin ayrı saklanır; yeniden üretim onları
-            silmez. Ham CV burada gösterilmez.
+            Salt okunur yapımcı notları. Ham CV burada yoktur.
           </p>
         </div>
         <div className="flex flex-wrap gap-3 text-sm print:hidden">
-          <Link href={`/sunucu/basvurular/${id}/notlar`} className="text-[var(--accent)]">
-            Kayıt notları
+          <Link href={`/sunucu/basvurular/${id}`} className="text-[var(--accent)]">
+            Düzenleme görünümü
           </Link>
           <Link href="/sunucu/basvurular" className="text-[var(--accent)]">
             Listeye dön
@@ -53,19 +56,12 @@ export default async function SunucuBasvuruDetailPage({ params }: Props) {
         </div>
       </div>
 
-      <article className="panel space-y-3 text-sm">
-        <h2 className="font-[family-name:var(--font-display)] text-lg">
-          Üye onaylı gerçekler (salt okunur)
-        </h2>
-        <ul className="space-y-1 text-[var(--muted)]">
-          <li>Ad: {facts.displayName}</li>
-          <li>Hedef rol: {facts.targetRole || "—"}</li>
-          <li>Hikâye: {facts.storyTopic || "—"}</li>
-          <li>Katkı: {facts.contribution || "—"}</li>
-          <li>Tercihler: {facts.workPreferences || "—"}</li>
-          <li>Hariç: {facts.excludedTopics || "—"}</li>
-          <li>İletişim: {facts.contactChannel || "—"}</li>
-        </ul>
+      <article className="panel space-y-2 text-sm">
+        <h2 className="font-[family-name:var(--font-display)] text-lg">Onaylı kimlik</h2>
+        <p className="text-[var(--muted)]">
+          {facts.displayName}
+          {facts.targetRole ? ` · ${facts.targetRole}` : ""}
+        </p>
       </article>
 
       <HostRecordingScheduleForm
@@ -81,12 +77,7 @@ export default async function SunucuBasvuruDetailPage({ params }: Props) {
         }}
       />
 
-      <HostPackEditor
-        applicationId={id}
-        initial={result.effective}
-        hasHostEdits={result.hasHostEdits}
-        schemaKind={result.schemaKind}
-      />
+      <HostPrepReadonly pack={result.effective} />
     </section>
   );
 }

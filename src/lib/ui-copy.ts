@@ -115,8 +115,8 @@ export const ui = {
   arayanlar: {
     title: "Kariyer Portresi",
     lead:
-      "Kısa bir sohbetle ne yaptığını, nasıl düşündüğünü ve ne aradığını anlatırsın. Katılım isteğe bağlıdır; CV zorunlu değildir.",
-    apply: "Başvuruyu başlat",
+      "CV ne yaptığını söylüyor. Biz biraz da nasıl düşündüğünü göstermek istiyoruz. 15–20 dakikalık kısa bir profesyonel kayıt; bu bir iş görüşmesi değil.",
+    apply: "Kariyer Portresi'ne başvur",
     continue: "Başvuruma devam et",
     viewPrep: "Notlarımı aç",
     viewStatus: "Hazırlık durumunu gör",

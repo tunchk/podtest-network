@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireSession } from "@/lib/session";
 import { getGuestBriefForMember } from "@/lib/arayanlar/service";
 import { RECORDING_FORMAT_STEPS } from "@/lib/arayanlar/artifact-schema";
+import { HostHandoffButton } from "@/components/arayanlar/host-handoff-button";
 
 export default async function HazirligimPage() {
   const session = await requireSession();
@@ -17,9 +18,12 @@ export default async function HazirligimPage() {
             gösterilmez.
           </p>
         </div>
-        <Link href="/arayanlar/basvurum" className="text-sm text-[var(--accent)] print:hidden">
-          Başvuruma dön
-        </Link>
+        <div className="flex flex-wrap items-center gap-3 print:hidden">
+          {pack ? <HostHandoffButton /> : null}
+          <Link href="/arayanlar/basvurum" className="text-sm text-[var(--accent)]">
+            Başvuruma dön
+          </Link>
+        </div>
       </div>
 
       {!pack ? (

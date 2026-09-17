@@ -133,6 +133,7 @@ model User {
   hostAuthorization HostAuthorization?
   arayanlarApplications ArayanlarApplication[] @relation("ArayanlarApplicant")
   assignedApplications  ArayanlarApplication[] @relation("ArayanlarAssignedHost")
+  scheduledRecordings   ArayanlarApplication[] @relation("ArayanlarScheduleSetter")
   hostGrantsIssued      HostAuthorization[]    @relation("HostGrantIssuer")
 
   messagingPreferences MessagingPreferences?
@@ -495,6 +496,18 @@ model ArayanlarApplication {
 
   prepareJobId String?
 
+  /// Planned recording instant (UTC). Null = unscheduled / cancelled.
+  recordingScheduledAt       DateTime?
+  recordingTimezone          String?
+  recordingMeetingUrl        String?
+  recordingSchedulingNote    String?
+  recordingScheduledByUserId String?
+  recordingScheduledBy       User?     @relation("ArayanlarScheduleSetter", fields: [recordingScheduledByUserId], references: [id], onDelete: SetNull)
+  recordingScheduleUpdatedAt DateTime?
+  /// Bumped on each schedule/reschedule/cancel mutation for notification dedupe.
+  recordingScheduleVersion   Int       @default(0)
+  recordingCompletedAt       DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -503,6 +516,7 @@ model ArayanlarApplication {
 
   @@index([status, createdAt])
   @@index([assignedHostUserId])
+  @@index([recordingScheduledAt])
   @@map("arayanlar_application")
 }
 

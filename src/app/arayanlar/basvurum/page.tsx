@@ -5,6 +5,8 @@ import {
   mapArayanlarUserFacingState,
   userFacingStateLabel,
 } from "@/lib/arayanlar/presentation";
+import { toRecordingScheduleView } from "@/lib/arayanlar/recording-schedule";
+import { CandidateRecordingSchedule } from "@/components/arayanlar/candidate-recording-schedule";
 
 export default async function BasvurumPage() {
   const session = await requireSession();
@@ -28,6 +30,9 @@ export default async function BasvurumPage() {
       })
     : null;
 
+  const schedule = app ? toRecordingScheduleView(app) : null;
+  const prepReady = facing === "READY";
+
   return (
     <section className="space-y-6">
       <h1 className="font-[family-name:var(--font-display)] text-3xl">Başvurum</h1>
@@ -39,32 +44,37 @@ export default async function BasvurumPage() {
           </Link>
         </p>
       ) : (
-        <div className="panel space-y-3 text-sm">
-          <p>
-            Durum: <strong>{userFacingStateLabel(facing)}</strong>
-          </p>
-          <p className="text-[var(--muted)]">
-            Bu başvuru davet veya kesin kayıt tarihi değildir. Geri çekme sonrası host erişimi
-            kaldırılır; daha önce indirilmiş dosyalar geri alınamayabilir.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {facing === "READY" ? (
-              <Link href="/arayanlar/hazirligim" className="btn btn-primary inline-flex">
-                Notlarımı aç
+        <>
+          <div className="panel space-y-3 text-sm">
+            <p>
+              Durum: <strong>{userFacingStateLabel(facing)}</strong>
+            </p>
+            <p className="text-[var(--muted)]">
+              Bu başvuru davet veya kesin kayıt tarihi değildir. Geri çekme sonrası host erişimi
+              kaldırılır; daha önce indirilmiş dosyalar geri alınamayabilir.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {facing === "READY" ? (
+                <Link href="/arayanlar/hazirligim" className="btn btn-primary inline-flex">
+                  Notlarımı aç
+                </Link>
+              ) : null}
+              <Link href="/arayanlar#basvuru" className="btn btn-secondary inline-flex">
+                {facing === "DRAFT" || facing === "AWAITING_CONFIRMATION"
+                  ? "Başvuruma devam et"
+                  : facing === "QUEUED" ||
+                      facing === "RUNNING" ||
+                      facing === "SUBMITTED_ACCEPTED" ||
+                      facing === "READY"
+                    ? "Hazırlık durumunu gör"
+                    : "Başvuruya git"}
               </Link>
-            ) : null}
-            <Link href="/arayanlar#basvuru" className="btn btn-secondary inline-flex">
-              {facing === "DRAFT" || facing === "AWAITING_CONFIRMATION"
-                ? "Başvuruma devam et"
-                : facing === "QUEUED" ||
-                    facing === "RUNNING" ||
-                    facing === "SUBMITTED_ACCEPTED" ||
-                    facing === "READY"
-                  ? "Hazırlık durumunu gör"
-                  : "Başvuruya git"}
-            </Link>
+            </div>
           </div>
-        </div>
+          {schedule ? (
+            <CandidateRecordingSchedule schedule={schedule} prepReady={prepReady} />
+          ) : null}
+        </>
       )}
     </section>
   );
