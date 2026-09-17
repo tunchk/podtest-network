@@ -14,6 +14,8 @@ type Initial = {
   changeNote: string | null;
   publicationState: string | null;
   alreadyApproved: boolean;
+  canPublish?: boolean;
+  publishBlockedReason?: string | null;
 };
 
 export function HostPublicationPanel({
@@ -36,6 +38,7 @@ export function HostPublicationPanel({
   const [changeNote, setChangeNote] = useState(initial.changeNote);
   const [publicationState, setPublicationState] = useState(initial.publicationState);
   const [alreadyApproved, setAlreadyApproved] = useState(initial.alreadyApproved);
+  const canPublish = Boolean(initial.canPublish);
 
   async function post(action: "send_for_approval" | "publish") {
     if (busy) return;
@@ -168,20 +171,34 @@ export function HostPublicationPanel({
             >
               Yayın onayına gönder
             </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              disabled={busy || !reviewRequested || !alreadyApproved}
-              onClick={() => void post("publish")}
-              title={
-                alreadyApproved
-                  ? undefined
-                  : "Aday onayı olmadan yayınlanamaz"
-              }
-            >
-              Yayına al
-            </button>
+            {canPublish ? (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={busy}
+                onClick={() => void post("publish")}
+              >
+                Yayına al
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled
+                title={
+                  initial.publishBlockedReason ??
+                  (alreadyApproved
+                    ? "Yayına alma için yönetim yetkisi gerekir."
+                    : "Aday onayı olmadan yayınlanamaz")
+                }
+              >
+                Yayına al
+              </button>
+            )}
           </div>
+          {!canPublish && initial.publishBlockedReason ? (
+            <p className="text-[var(--muted)]">{initial.publishBlockedReason}</p>
+          ) : null}
         </>
       )}
 

@@ -153,8 +153,17 @@ export async function getKariyerPublicationCandidateState(options: {
   const preview = episodePreview(episode);
 
   if (episode.publicationState === "PUBLISHED") {
-    const publicUrl = resolvePublicUrl(preview);
-    if (!publicUrl) return { kind: "none" };
+    const publicUrl =
+      resolvePublicUrl(preview) ??
+      (episode.slug ? `/bolumler/${episode.slug}` : null);
+    if (!publicUrl) {
+      // Still surface published state — avoid falling back to prep/schedule cards.
+      return {
+        kind: "published",
+        preview: { ...preview, publicPath: episode.slug ? `/bolumler/${episode.slug}` : null },
+        publicUrl: episode.slug ? `/bolumler/${episode.slug}` : "/bolumler",
+      };
+    }
     return { kind: "published", preview, publicUrl };
   }
 
@@ -171,14 +180,20 @@ export async function getKariyerPublicationCandidateState(options: {
     };
   }
 
-  const alreadyApproved = await hasCurrentAcceptance({
-    userId: options.candidateUserId,
-    type: "PUBLICATION",
-    documentType: "PUBLICATION_APPROVAL",
-    relatedResourceType: "podcast_episode",
-    relatedResourceId: episode.id,
-    publicationVersionId: app.publicationReviewVersionId,
-  });
+  const currentVersionId = computeEpisodePublicationVersionId(episode);
+  const versionMatchesReview = currentVersionId === app.publicationReviewVersionId;
+
+  // Approval is only valid for the exact current episode version.
+  const alreadyApproved =
+    versionMatchesReview &&
+    (await hasCurrentAcceptance({
+      userId: options.candidateUserId,
+      type: "PUBLICATION",
+      documentType: "PUBLICATION_APPROVAL",
+      relatedResourceType: "podcast_episode",
+      relatedResourceId: episode.id,
+      publicationVersionId: currentVersionId,
+    }));
 
   return { kind: "approval_requested", preview, alreadyApproved };
 }
@@ -208,7 +223,16 @@ export async function sendKariyerPublicationForApproval(options: {
 
   await ensureLegalDocumentsSeeded();
 
-  let episodeId = options.episodeId?.trim() || app.publicationEpisodeId || null;
+  // Only reuse the application’s linked episode. Ignore foreign client episodeId on first send.
+  const requestedId = options.episodeId?.trim() || null;
+  if (
+    requestedId &&
+    app.publicationEpisodeId &&
+    requestedId !== app.publicationEpisodeId
+  ) {
+    fail("EPISODE_FORBIDDEN", "Bu başvuruya yalnızca mevcut bağlı bölüm kullanılabilir.");
+  }
+  let episodeId = app.publicationEpisodeId || null;
 
   if (episodeId) {
     const existing = await prisma.podcastEpisode.findUnique({ where: { id: episodeId } });
@@ -278,6 +302,7 @@ export async function sendKariyerPublicationForApproval(options: {
   const publicationVersionId = computeEpisodePublicationVersionId(episode);
 
   // Ensure publish gate will require this candidate's publication approval.
+  // Do not forge memberAcceptedAt — publication LegalAcceptance is the candidate action.
   await prisma.episodeAppearance.upsert({
     where: {
       episodeId_memberUserId: {
@@ -292,7 +317,7 @@ export async function sendKariyerPublicationForApproval(options: {
       requestedBy: "ADMIN",
       proposedById: options.actorUserId,
       adminVerifiedAt: new Date(),
-      memberAcceptedAt: new Date(),
+      memberAcceptedAt: null,
       creditLabel: "Kariyer Portresi",
     },
     update: {
@@ -300,7 +325,7 @@ export async function sendKariyerPublicationForApproval(options: {
       revokedAt: null,
       rejectedAt: null,
       adminVerifiedAt: new Date(),
-      memberAcceptedAt: new Date(),
+      // Preserve an existing memberAcceptedAt; never invent one here.
     },
   });
 

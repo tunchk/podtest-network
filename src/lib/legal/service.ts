@@ -261,6 +261,7 @@ export function computeEpisodePublicationVersionId(episode: {
   audioUrl: string | null;
   listeningUrl: string | null;
   spotifyEpisodeUrl: string | null;
+  artworkUrl?: string | null;
   publicationDate: Date | null;
 }) {
   const payload = JSON.stringify({
@@ -270,6 +271,7 @@ export function computeEpisodePublicationVersionId(episode: {
     audioUrl: episode.audioUrl,
     listeningUrl: episode.listeningUrl,
     spotifyEpisodeUrl: episode.spotifyEpisodeUrl,
+    artworkUrl: episode.artworkUrl ?? null,
     publicationDate: episode.publicationDate?.toISOString() ?? null,
   });
   return createHash("sha256").update(payload).digest("hex").slice(0, 32);

@@ -1,8 +1,10 @@
 import { prisma } from "@/lib/db";
 import { computeEpisodePublicationVersionId, hasCurrentAcceptance } from "@/lib/legal/service";
 
-/** Load host-facing publication panel initial state for an application. */
-export async function getHostPublicationPanelInitial(applicationId: string) {
+export async function getHostPublicationPanelInitial(
+  applicationId: string,
+  options?: { actorIsAdmin?: boolean },
+) {
   const app = await prisma.arayanlarApplication.findUnique({
     where: { id: applicationId },
   });
@@ -13,28 +15,25 @@ export async function getHostPublicationPanelInitial(applicationId: string) {
     : null;
 
   let alreadyApproved = false;
-  if (episode && app.publicationReviewVersionId) {
-    alreadyApproved = await hasCurrentAcceptance({
-      userId: app.userId,
-      type: "PUBLICATION",
-      documentType: "PUBLICATION_APPROVAL",
-      relatedResourceType: "podcast_episode",
-      relatedResourceId: episode.id,
-      publicationVersionId: app.publicationReviewVersionId,
-    });
-  } else if (episode) {
-    const versionId = computeEpisodePublicationVersionId(episode);
-    alreadyApproved = await hasCurrentAcceptance({
-      userId: app.userId,
-      type: "PUBLICATION",
-      documentType: "PUBLICATION_APPROVAL",
-      relatedResourceType: "podcast_episode",
-      relatedResourceId: episode.id,
-      publicationVersionId: versionId,
-    });
+  if (episode) {
+    const currentVersionId = computeEpisodePublicationVersionId(episode);
+    const versionMatchesReview =
+      !app.publicationReviewVersionId ||
+      currentVersionId === app.publicationReviewVersionId;
+    alreadyApproved =
+      versionMatchesReview &&
+      (await hasCurrentAcceptance({
+        userId: app.userId,
+        type: "PUBLICATION",
+        documentType: "PUBLICATION_APPROVAL",
+        relatedResourceType: "podcast_episode",
+        relatedResourceId: episode.id,
+        publicationVersionId: currentVersionId,
+      }));
   }
 
   const facts = app.submittedFacts as { displayName?: string } | null;
+  const actorIsAdmin = Boolean(options?.actorIsAdmin);
 
   return {
     episodeId: episode?.id ?? null,
@@ -47,5 +46,14 @@ export async function getHostPublicationPanelInitial(applicationId: string) {
     changeNote: app.publicationChangeRequestNote,
     publicationState: episode?.publicationState ?? null,
     alreadyApproved,
+    canPublish: actorIsAdmin && alreadyApproved && episode?.publicationState !== "PUBLISHED",
+    publishBlockedReason:
+      episode?.publicationState === "PUBLISHED"
+        ? null
+        : !alreadyApproved
+          ? "Bu yayın versiyonu henüz aday tarafından onaylanmadı."
+          : !actorIsAdmin
+            ? "Yayına alma için yönetim yetkisi gerekir."
+            : null,
   };
 }

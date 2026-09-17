@@ -2,7 +2,7 @@
 
 export const ui = {
   brand: "PodTest Network",
-  tagline: "Yazılım, kalite, kariyer ve PodTest’in arkasındaki insanlar.",
+  tagline: "Yazılım, kalite ve kariyer etrafında açık bir topluluk.",
   nav: {
     home: "Ana sayfa",
     members: "Üyeler",
@@ -24,12 +24,61 @@ export const ui = {
     signOut: "Çıkış",
   },
   landing: {
-    title: "PodTest Network",
-    lead: "Yazılım, kalite, mühendislik ve kariyer etrafında açık bir topluluk. Herkes katılabilir; üyelik için başvuru, mülakat veya test görevi yok.",
-    ctaJoin: "Katıl",
-    ctaBrowse: "Üyelere göz at",
-    ctaArayanlar: "Kariyer Portresi'ne katıl",
-    laterNote: "Ödemeler ve ek üyelik özellikleri yol haritasında — henüz burada değil.",
+    brand: "PodTest Network",
+    title: "Yazılım, kalite ve kariyer etrafında açık bir topluluk.",
+    lead: "İnsanlarla tanış, deneyimini paylaş, yeni bölümler keşfet ve profesyonel olarak görünür ol.",
+    reassuranceLead: "Üyelik için başvuru, mülakat veya test görevi yok.",
+    reassuranceFollow: "Profilini oluştur, topluluğa katıl.",
+    /** Combined form retained for older call sites */
+    reassurance:
+      "Üyelik için başvuru, mülakat veya test görevi yok. Profilini oluştur, topluluğa katıl.",
+    ctaJoin: "Topluluğa katıl",
+    ctaEpisodes: "Bölümleri keşfet",
+    ctaArayanlar: "Kariyer Portresi'ni keşfet",
+    /** @deprecated kept for older call sites; prefer ctaEpisodes */
+    ctaBrowse: "Bölümleri keşfet",
+    openTitle: "Herkes katılabilir",
+    openBody:
+      "Konuşmacı, içerik üreticisi veya belirli bir şirkette çalışıyor olman gerekmez. Yazılım ve kalite dünyasının herhangi bir yerindeysen; öğrenmek, paylaşmak veya deneyimini görünür kılmak için yerin var.",
+    whatTitle: "Ne var?",
+    /** Compact hero orientation — keep shorter than lower-page what.* */
+    heroWhat: {
+      community: {
+        title: "Topluluk",
+        body: "İnsanlarla tanış ve görünür ol.",
+      },
+      episodes: {
+        title: "PodTest bölümleri",
+        body: "Konuşmaları ve yeni bölümleri keşfet.",
+      },
+      kariyer: {
+        title: "Kariyer Portresi",
+        body: "CV'nin arkasındaki insanı ve düşünme biçimini görünür kıl.",
+      },
+    },
+    what: {
+      community: {
+        title: "Topluluk",
+        body: "Yazılım ve kalite dünyasından insanlarla tanış, profilini oluştur ve bağlantı kur.",
+        href: "/uyeler",
+        linkLabel: "Üyelere göz at",
+      },
+      episodes: {
+        title: "PodTest bölümleri",
+        body: "Yeni ve geçmiş bölümleri keşfet, konuşmaları takip et.",
+        href: "/bolumler",
+        linkLabel: "Bölümleri keşfet",
+      },
+      kariyer: {
+        title: "Kariyer Portresi",
+        body: "CV'nin ötesine geç. Deneyimini, nasıl düşündüğünü ve bundan sonra ne aradığını anlatan kısa bir profesyonel kayıt oluştur.",
+        href: "/arayanlar",
+        linkLabel: "Kariyer Portresi'ni keşfet",
+      },
+    },
+    latestEpisodes: "Son bölümler",
+    allEpisodes: "Tüm bölümler",
+    noEpisodes: "Henüz yayımlanmış bölüm yok.",
   },
   auth: {
     registerTitle: "Hesap oluştur",

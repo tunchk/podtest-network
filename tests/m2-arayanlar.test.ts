@@ -305,6 +305,10 @@ describe("m2.2 arayanlar preparation", () => {
     expect(guestBrief?.brief.closing.fixedQuestion).toMatch(/bu kişiyle konuşmalıyım/);
     expect(JSON.stringify(guestBrief)).not.toMatch(/coldOpen|timelineOverview|recordingChecklist/i);
     expect(JSON.stringify(guestBrief)).not.toMatch(/supportingFacts|rapidRound|hostPack/i);
+    expect(JSON.stringify(guestBrief)).not.toMatch(
+      /thinkingScenario\.scenario|hostQuestions|whatTheHostShouldListenFor|"preparation"/,
+    );
+    expect(guestBrief).not.toHaveProperty("preparation");
 
     const guestJob = await db.aiJob.findUniqueOrThrow({ where: { id: jobId } });
     expect(JSON.stringify(guestJob.resultJson)).not.toMatch(/mainQuestions|supportingFacts/);

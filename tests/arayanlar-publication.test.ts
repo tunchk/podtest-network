@@ -175,17 +175,28 @@ describe("Kariyer Portresi publication approval", () => {
 
   afterAll(async () => {
     const ids = [guestId, hostId, otherId, adminId].filter(Boolean);
-    await db.inAppNotification.deleteMany({ where: { userId: { in: ids } } });
-    await db.legalAcceptance.deleteMany({ where: { userId: { in: ids } } });
-    const app = await db.arayanlarApplication.findUnique({ where: { id: applicationId } });
-    if (app?.publicationEpisodeId) {
-      await db.episodeAppearance.deleteMany({ where: { episodeId: app.publicationEpisodeId } });
-      await db.podcastEpisode.deleteMany({ where: { id: app.publicationEpisodeId } });
+    const apps = await db.arayanlarApplication.findMany({
+      where: { OR: [{ id: applicationId }, { userId: { in: ids } }, { user: { email: { contains: `pub-guest2-${suffix}` } } }] },
+      select: { id: true, userId: true, publicationEpisodeId: true },
+    });
+    const episodeIds = apps
+      .map((a) => a.publicationEpisodeId)
+      .filter((id): id is string => Boolean(id));
+    const appIds = apps.map((a) => a.id);
+    const userIds = [...new Set([...ids, ...apps.map((a) => a.userId)])];
+
+    await db.inAppNotification.deleteMany({ where: { userId: { in: userIds } } });
+    await db.legalAcceptance.deleteMany({ where: { userId: { in: userIds } } });
+    if (episodeIds.length) {
+      await db.episodeAppearance.deleteMany({ where: { episodeId: { in: episodeIds } } });
+      await db.podcastEpisode.deleteMany({ where: { id: { in: episodeIds } } });
     }
-    await db.arayanlarArtifact.deleteMany({ where: { applicationId } });
-    await db.arayanlarApplication.deleteMany({ where: { id: applicationId } });
-    await db.hostAuthorization.deleteMany({ where: { userId: { in: ids } } });
-    await db.user.deleteMany({ where: { id: { in: ids } } });
+    // Episodes createdBy test users without app link
+    await db.podcastEpisode.deleteMany({ where: { createdById: { in: userIds } } });
+    await db.arayanlarArtifact.deleteMany({ where: { applicationId: { in: appIds } } });
+    await db.arayanlarApplication.deleteMany({ where: { id: { in: appIds } } });
+    await db.hostAuthorization.deleteMany({ where: { userId: { in: userIds } } });
+    await db.user.deleteMany({ where: { id: { in: userIds } } });
     await db.$disconnect();
   });
 
@@ -367,5 +378,129 @@ describe("Kariyer Portresi publication approval", () => {
 
     // Confirm old acceptance still for oldVersion only
     expect(oldVersion).toBe(resent.publicationVersionId);
+  });
+
+  it("blocks withdraw after publish and keeps candidate state coherent", async () => {
+    const { withdrawApplication } = await import("@/lib/arayanlar/service");
+    const app = await db.arayanlarApplication.findUniqueOrThrow({ where: { id: applicationId } });
+    const episode = app.publicationEpisodeId
+      ? await db.podcastEpisode.findUniqueOrThrow({ where: { id: app.publicationEpisodeId } })
+      : null;
+    expect(episode?.publicationState).toBe("PUBLISHED");
+
+    await expect(withdrawApplication(guestId)).rejects.toMatchObject({
+      code: "ALREADY_PUBLISHED",
+    });
+
+    const still = await db.arayanlarApplication.findUniqueOrThrow({ where: { id: applicationId } });
+    expect(still.status).toBe("SUBMITTED");
+    expect(still.withdrawnAt).toBeNull();
+
+    const state = await getKariyerPublicationCandidateState({ candidateUserId: guestId });
+    expect(state.kind).toBe("published");
+  });
+
+  it("marks approval stale when live episode version diverges from review version", async () => {
+    // Fresh draft episode path for isolation — reuse host-owned app fields carefully.
+    // Use a separate guest to avoid clobbering the published application above.
+    const guest2 = await db.user.create({
+      data: {
+        name: "Pub Guest2",
+        email: `pub-guest2-${suffix}@example.com`,
+        emailVerified: true,
+        staffRole: "MEMBER",
+      },
+    });
+    const app2 = await db.arayanlarApplication.create({
+      data: {
+        userId: guest2.id,
+        status: "SUBMITTED",
+        prepStatus: "READY",
+        submittedRevision: 1,
+        editorialTemplateVersion: "kariyer-portresi-producer-v1",
+        submittedFacts: {
+          displayName: "Pub Guest2",
+          targetRole: "QA",
+          storyTopic: "x",
+          contribution: "y",
+          workPreferences: "",
+          excludedTopics: "",
+          contactChannel: "platform",
+          profileHintsUsed: [],
+        },
+        draftAnswers: {},
+        conversationTurns: [],
+        questionsAsked: 0,
+        confirmedCostAt: new Date(),
+        submittedAt: new Date(),
+        assignedHostUserId: hostId,
+        assignedAt: new Date(),
+        assignedByUserId: adminId,
+      },
+    });
+    await db.arayanlarArtifact.create({
+      data: {
+        applicationId: app2.id,
+        kind: "HOST_PACK",
+        submittedRevision: 1,
+        editorialTemplateVersion: "kariyer-portresi-producer-v1",
+        generatedJson: { schemaVersion: PREPARATION_SCHEMA_VERSION, preparation: {} },
+      },
+    }).catch(() => null);
+
+    // Minimal prep artifact may fail schema — skip if create fails; use send which needs READY.
+    // HOST_PACK content is not required for publication send beyond prepStatus READY.
+    const sent = await sendKariyerPublicationForApproval({
+      actorUserId: hostId,
+      applicationId: app2.id,
+      title: `KP Guest2 ${suffix}`,
+      description: "v1",
+    });
+    await approveKariyerPublication({ candidateUserId: guest2.id });
+
+    // Material edit outside send_for_approval (simulates stale review id)
+    await db.podcastEpisode.update({
+      where: { id: sent.episode.id },
+      data: { title: `KP Guest2 ${suffix} CHANGED` },
+    });
+    // Keep old reviewVersionId on application
+    await db.arayanlarApplication.update({
+      where: { id: app2.id },
+      data: { publicationReviewVersionId: sent.publicationVersionId },
+    });
+
+    const state = await getKariyerPublicationCandidateState({ candidateUserId: guest2.id });
+    expect(state.kind).toBe("approval_requested");
+    if (state.kind === "approval_requested") {
+      expect(state.alreadyApproved).toBe(false);
+    }
+
+    await expect(
+      publishKariyerPortresiEpisode({ actorUserId: adminId, applicationId: app2.id }),
+    ).rejects.toMatchObject({ code: "PUBLICATION_APPROVAL_REQUIRED" });
+
+    // Reject appearance then try guest-less bolumler publish — must still require KP approval.
+    await db.episodeAppearance.updateMany({
+      where: { episodeId: sent.episode.id, memberUserId: guest2.id },
+      data: { status: "REJECTED", rejectedAt: new Date() },
+    });
+    const { updatePodcastEpisode } = await import("@/lib/community/episodes");
+    await expect(
+      updatePodcastEpisode({
+        adminId,
+        episodeId: sent.episode.id,
+        publicationState: "PUBLISHED",
+      }),
+    ).rejects.toThrow("LEGAL_PUBLICATION_REQUIRED");
+
+    // Artwork is part of publication version — changing it must invalidate prior approval path.
+    const beforeArt = computeEpisodePublicationVersionId(
+      await db.podcastEpisode.findUniqueOrThrow({ where: { id: sent.episode.id } }),
+    );
+    const afterArt = computeEpisodePublicationVersionId({
+      ...(await db.podcastEpisode.findUniqueOrThrow({ where: { id: sent.episode.id } })),
+      artworkUrl: "https://example.com/cover.png",
+    });
+    expect(afterArt).not.toBe(beforeArt);
   });
 });

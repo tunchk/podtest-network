@@ -425,7 +425,13 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error ?? "Geri çekilemedi");
+        setError(
+          data.message ??
+            (data.error === "ALREADY_PUBLISHED"
+              ? "Yayımlanmış Kariyer Portresi başvurusu geri çekilemez."
+              : data.error) ??
+            "Geri çekilemedi",
+        );
         return;
       }
       if (data.application) setApp(data.application);

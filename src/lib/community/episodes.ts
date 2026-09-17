@@ -141,6 +141,7 @@ export async function updatePodcastEpisode(options: {
       options.audioUrl !== undefined ||
       listeningUrl !== undefined ||
       spotifyEpisodeUrl !== undefined ||
+      options.artworkUrl !== undefined ||
       options.publicationDate !== undefined);
 
   if (becomingPublished || materialWhilePublished) {
@@ -157,6 +158,10 @@ export async function updatePodcastEpisode(options: {
       listeningUrl: listeningUrl !== undefined ? listeningUrl : existing.listeningUrl,
       spotifyEpisodeUrl:
         spotifyEpisodeUrl !== undefined ? spotifyEpisodeUrl : existing.spotifyEpisodeUrl,
+      artworkUrl:
+        options.artworkUrl !== undefined
+          ? options.artworkUrl?.trim() || null
+          : existing.artworkUrl,
       publicationDate:
         options.publicationDate !== undefined
           ? options.publicationDate
@@ -196,7 +201,25 @@ export async function updatePodcastEpisode(options: {
         }
       }
     }
-    // No appearances: guest-less catalog/editorial (includes RSS mirrors). Staff may publish.
+
+    // Kariyer Portresi linked episodes always require the candidate's current-version approval,
+    // even if appearances were rejected or never created (blocks guest-less bolumler bypass).
+    const kpApp = await prisma.arayanlarApplication.findFirst({
+      where: { publicationEpisodeId: existing.id },
+      select: { userId: true },
+    });
+    if (kpApp) {
+      try {
+        await requirePublicationApproval({
+          userId: kpApp.userId,
+          episodeId: existing.id,
+          publicationVersionId,
+        });
+      } catch {
+        fail("LEGAL_PUBLICATION_REQUIRED");
+      }
+    }
+    // No appearances and not Kariyer-linked: guest-less catalog/editorial (includes RSS). Staff may publish.
   }
 
   return prisma.podcastEpisode.update({

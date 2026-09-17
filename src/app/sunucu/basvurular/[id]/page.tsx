@@ -38,7 +38,9 @@ export default async function SunucuBasvuruDetailPage({ params }: Props) {
     schedule.scheduledAt != null
       ? wallPartsFromUtc(schedule.scheduledAt, tz)
       : { date: "", time: "" };
-  const publicationInitial = await getHostPublicationPanelInitial(id);
+  const publicationInitial = await getHostPublicationPanelInitial(id, {
+    actorIsAdmin: view.actor.isAdmin,
+  });
 
   const hostPack = await getHostPackForAssignedHost({
     hostUserId: session.user.id,

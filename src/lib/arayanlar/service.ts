@@ -158,6 +158,17 @@ async function reopenWithdrawnAsDraft(userId: string) {
       assignedAt: null,
       assignedByUserId: null,
       editorialTemplateVersion: EDITORIAL_TEMPLATE_VERSION,
+      recordingScheduledAt: null,
+      recordingTimezone: null,
+      recordingMeetingUrl: null,
+      recordingSchedulingNote: null,
+      recordingScheduledByUserId: null,
+      recordingCompletedAt: null,
+      publicationReviewRequestedAt: null,
+      publicationReviewVersionId: null,
+      publicationChangeRequestNote: null,
+      publicationChangeRequestedAt: null,
+      // Keep publicationEpisodeId for staff history; review flags above stay cleared.
     },
   });
 }
@@ -505,6 +516,19 @@ export async function withdrawApplication(userId: string) {
   if (!app) throw new Error("NOT_FOUND");
   if (app.status === "WITHDRAWN") return app;
 
+  // Published Kariyer Portresi episode must not be orphaned by withdraw.
+  if (app.publicationEpisodeId) {
+    const episode = await prisma.podcastEpisode.findUnique({
+      where: { id: app.publicationEpisodeId },
+      select: { publicationState: true },
+    });
+    if (episode?.publicationState === "PUBLISHED") {
+      throw Object.assign(new Error("Yayımlanmış Kariyer Portresi başvurusu geri çekilemez."), {
+        code: "ALREADY_PUBLISHED",
+      });
+    }
+  }
+
   if (app.prepareJobId) {
     await prisma.aiJob.updateMany({
       where: { id: app.prepareJobId, status: { in: ["QUEUED", "RUNNING"] } },
@@ -523,11 +547,23 @@ export async function withdrawApplication(userId: string) {
     where: { id: app.id },
     data: {
       status: "WITHDRAWN",
-      prepStatus: app.prepStatus === "READY" ? "CANCELLED" : "CANCELLED",
+      prepStatus: "CANCELLED",
       withdrawnAt: new Date(),
       assignedHostUserId: null,
       assignedAt: null,
       assignedByUserId: null,
+      // Clear operational schedule / publication-review state so reopen cannot resurrect them.
+      recordingScheduledAt: null,
+      recordingTimezone: null,
+      recordingMeetingUrl: null,
+      recordingSchedulingNote: null,
+      recordingScheduledByUserId: null,
+      recordingScheduleUpdatedAt: new Date(),
+      recordingScheduleVersion: { increment: 1 },
+      publicationReviewRequestedAt: null,
+      publicationReviewVersionId: null,
+      publicationChangeRequestNote: null,
+      publicationChangeRequestedAt: null,
     },
   });
 
@@ -659,13 +695,7 @@ export async function reconcileArayanlarPrepStatusFromJob(userId: string) {
     data: { prepStatus: "READY" },
   });
 
-  const { notifyArayanlarPrepReady } = await import("@/lib/arayanlar/notifications");
-  await notifyArayanlarPrepReady({
-    userId,
-    applicationId: app.id,
-    revision: app.submittedRevision,
-  });
-
+  // Do not notify here — GET/poll heal must not emit. Job completion notifies once.
   return updated;
 }
 
@@ -687,13 +717,13 @@ export async function getGuestBriefForMember(userId: string) {
   if (!artifact) return null;
   const parsed = parseStoredGuestArtifact(artifact.generatedJson);
   if (!parsed) return null;
+  // Guest-safe only: never return raw preparation (thinking scenario, hostQuestions, etc.).
   return {
     applicationId: app.id,
     submittedRevision: artifact.submittedRevision,
     editorialTemplateVersion: artifact.editorialTemplateVersion,
     schemaKind: parsed.kind,
     brief: parsed.view,
-    preparation: parsed.preparation ?? null,
   };
 }
 

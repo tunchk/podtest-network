@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireSession } from "@/lib/session";
+import { prisma } from "@/lib/db";
 import { getHostPackForAssignedHost } from "@/lib/arayanlar/service";
 import { HostPrepReadonly } from "@/components/arayanlar/host-prep-readonly";
 import { HostRecordingScheduleForm } from "@/components/arayanlar/host-recording-schedule-form";
@@ -31,6 +32,10 @@ export default async function SunucuBasvuruNotlarPage({ params }: Props) {
     redirect("/sunucu/basvurular");
   }
 
+  const actor = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { staffRole: true },
+  });
   const facts = result.application.submittedFacts as SubmittedFacts;
   const schedule = toRecordingScheduleView(result.application);
   const tz = schedule.timeZone || DEFAULT_RECORDING_TIMEZONE;
@@ -38,7 +43,9 @@ export default async function SunucuBasvuruNotlarPage({ params }: Props) {
     schedule.scheduledAt != null
       ? wallPartsFromUtc(schedule.scheduledAt, tz)
       : { date: "", time: "" };
-  const publicationInitial = await getHostPublicationPanelInitial(id);
+  const publicationInitial = await getHostPublicationPanelInitial(id, {
+    actorIsAdmin: actor?.staffRole === "ADMIN",
+  });
 
   return (
     <section className="space-y-6">

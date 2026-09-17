@@ -10,6 +10,20 @@ import { CandidateRecordingSchedule } from "@/components/arayanlar/candidate-rec
 import { CandidatePublicationPanel } from "@/components/arayanlar/candidate-publication-panel";
 import { getKariyerPublicationCandidateState } from "@/lib/arayanlar/publication";
 
+function primaryStatusLabel(
+  publication: Awaited<ReturnType<typeof getKariyerPublicationCandidateState>>,
+  facing: ReturnType<typeof mapArayanlarUserFacingState>,
+) {
+  if (publication.kind === "published") return "Kariyer Portresi yayında";
+  if (publication.kind === "change_requested") return "Değişiklik talebin iletildi";
+  if (publication.kind === "approval_requested") {
+    return publication.alreadyApproved
+      ? "Yayın onayın alındı — ekip yayına alacak"
+      : "Yayın onayın bekleniyor";
+  }
+  return userFacingStateLabel(facing);
+}
+
 export default async function BasvurumPage() {
   const session = await requireSession();
   const app = await prisma.arayanlarApplication.findUnique({
@@ -50,6 +64,8 @@ export default async function BasvurumPage() {
   const showSchedule =
     !showPublication && schedule != null && (prepReady || schedule.scheduled);
 
+  const showPrepActions = !showPublication && facing === "READY";
+
   return (
     <section className="space-y-6">
       <h1 className="font-[family-name:var(--font-display)] text-3xl">Başvurum</h1>
@@ -64,37 +80,35 @@ export default async function BasvurumPage() {
         <>
           <div className="panel space-y-3 text-sm">
             <p>
-              Durum:{" "}
-              <strong>
-                {publication.kind === "published"
-                  ? "Kariyer Portresi yayında"
-                  : publication.kind === "approval_requested"
-                    ? "Yayın onayın bekleniyor"
-                    : publication.kind === "change_requested"
-                      ? "Değişiklik talebin iletildi"
-                      : userFacingStateLabel(facing)}
-              </strong>
+              Durum: <strong>{primaryStatusLabel(publication, facing)}</strong>
             </p>
             <p className="text-[var(--muted)]">
               Bu başvuru davet veya kesin kayıt tarihi değildir. Geri çekme sonrası host erişimi
               kaldırılır; daha önce indirilmiş dosyalar geri alınamayabilir.
             </p>
             <div className="flex flex-wrap gap-2">
-              {facing === "READY" && publication.kind !== "published" ? (
+              {showPrepActions ? (
                 <Link href="/arayanlar/hazirligim" className="btn btn-primary inline-flex">
                   Notlarımı aç
                 </Link>
               ) : null}
-              <Link href="/arayanlar#basvuru" className="btn btn-secondary inline-flex">
-                {facing === "DRAFT" || facing === "AWAITING_CONFIRMATION"
-                  ? "Başvuruma devam et"
-                  : facing === "QUEUED" ||
-                      facing === "RUNNING" ||
-                      facing === "SUBMITTED_ACCEPTED" ||
-                      facing === "READY"
-                    ? "Hazırlık durumunu gör"
-                    : "Başvuruya git"}
-              </Link>
+              {!showPublication ? (
+                <Link href="/arayanlar#basvuru" className="btn btn-secondary inline-flex">
+                  {facing === "DRAFT" || facing === "AWAITING_CONFIRMATION"
+                    ? "Başvuruma devam et"
+                    : facing === "QUEUED" ||
+                        facing === "RUNNING" ||
+                        facing === "SUBMITTED_ACCEPTED" ||
+                        facing === "READY"
+                      ? "Hazırlık durumunu gör"
+                      : "Başvuruya git"}
+                </Link>
+              ) : null}
+              {publication.kind === "published" && publication.publicUrl ? (
+                <Link href={publication.publicUrl} className="btn btn-primary inline-flex">
+                  Bölümü aç
+                </Link>
+              ) : null}
             </div>
           </div>
 

@@ -114,8 +114,22 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ error: "unknown_action" }, { status: 400 });
   } catch (error) {
-    const code = error instanceof Error ? error.message : "error";
-    const status = code === "INSUFFICIENT_CREDITS" ? 402 : 400;
-    return NextResponse.json({ error: code }, { status });
+    const code =
+      error instanceof Error && "code" in error
+        ? String((error as { code: string }).code)
+        : error instanceof Error
+          ? error.message
+          : "error";
+    const message = error instanceof Error ? error.message : "İşlem başarısız.";
+    const status =
+      code === "INSUFFICIENT_CREDITS"
+        ? 402
+        : code === "ALREADY_PUBLISHED"
+          ? 409
+          : 400;
+    return NextResponse.json(
+      { error: code, message: code === "ALREADY_PUBLISHED" ? message : undefined },
+      { status },
+    );
   }
 }
