@@ -114,13 +114,38 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ error: "unknown_action" }, { status: 400 });
   } catch (error) {
+    const prismaCode =
+      error && typeof error === "object" && "code" in error
+        ? String((error as { code: unknown }).code)
+        : null;
+    const rawMessage = error instanceof Error ? error.message : "İşlem başarısız.";
+    const isPrismaValidation =
+      (error instanceof Error && error.name === "PrismaClientValidationError") ||
+      /Unknown argument/i.test(rawMessage);
+
     const code =
-      error instanceof Error && "code" in error
+      error instanceof Error && "code" in error && typeof (error as { code: unknown }).code === "string"
         ? String((error as { code: string }).code)
         : error instanceof Error
           ? error.message
           : "error";
-    const message = error instanceof Error ? error.message : "İşlem başarısız.";
+
+    if (body.action === "withdraw" && (isPrismaValidation || prismaCode === "P2022" || code === "WITHDRAW_FAILED")) {
+      console.error("[arayanlar] withdraw failed", {
+        code,
+        prismaCode,
+        name: error instanceof Error ? error.name : typeof error,
+        message: rawMessage.slice(0, 300),
+      });
+      return NextResponse.json(
+        {
+          error: "WITHDRAW_FAILED",
+          message: "Başvuru şu anda geri çekilemedi. Lütfen yeniden dene.",
+        },
+        { status: 500 },
+      );
+    }
+
     const status =
       code === "INSUFFICIENT_CREDITS"
         ? 402
@@ -128,7 +153,15 @@ export async function POST(request: Request) {
           ? 409
           : 400;
     return NextResponse.json(
-      { error: code, message: code === "ALREADY_PUBLISHED" ? message : undefined },
+      {
+        error: code,
+        message:
+          code === "ALREADY_PUBLISHED"
+            ? rawMessage
+            : isPrismaValidation
+              ? "İşlem şu anda tamamlanamadı. Lütfen yeniden dene."
+              : undefined,
+      },
       { status },
     );
   }

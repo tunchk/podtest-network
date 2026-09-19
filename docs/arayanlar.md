@@ -21,7 +21,9 @@ Prep status (`NOT_STARTED` → `QUEUED` → `RUNNING` → `READY` | `FAILED` | `
 - after withdraw, confirm cost may reopen a fresh `DRAFT` (same row; new revision on next submit)
 - post-submit “revise” returns to `DRAFT` without rewriting the prior submitted revision or packs
 
-CV is optional. Members can still use chat or the editable summary with no CV.
+CV is used for preparation grounding when available. Members without a usable CV can upload
+via the shared `/api/cv` control in the application draft step. Existing extracted CVs are
+reused (no forced re-upload). Raw CV never appears on the application row or in host views.
 
 ## Artifacts
 

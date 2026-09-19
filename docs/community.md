@@ -42,7 +42,7 @@ Daily quotas use `pg_advisory_xact_lock` for concurrency-safe enforcement and id
 - Cryptographically random, expiring, single-use tokens. **Only SHA-256 hashes** stored.
 - Plaintext returned once for link copy (`/davet/konusmaci?token=…`). No real invitation emails are sent.
 - Optional recipient email binding: acceptance requires an authenticated account with that email **and** `emailVerified=true` from the secure verification flow (not a client claim).
-- Email verification: `/hesabim/eposta-dogrula` + local **mail-sink** under `storage/mail-sink/` (gitignored). No outbound mail in this milestone.
+- Email verification: `/hesabim/eposta-dogrula` + local **mail-sink** under `STORAGE_ROOT/mail-sink/` (gitignored). No outbound mail in this milestone. Mail sink is disabled when `NODE_ENV=production`.
 - Acceptance is atomic (`FOR UPDATE`) and idempotent for the same consumer.
 - Rejected: expired, revoked, previously consumed, wrong-account.
 - Grants `profile.speakerParticipation` and/or confirmed episode association only — **never** staff, moderator, host-workspace, employer, or paid-plan privileges. Distinct from professional qualification verification.

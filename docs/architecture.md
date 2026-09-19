@@ -8,7 +8,7 @@ Modular monolith (logical boundaries, single Next.js app):
 | Profiles / publication | `src/lib/profiles/*`, `src/app/hesabim/profil`, `src/app/u/[slug]` |
 | Directory | `src/app/uyeler` |
 | Moderation (manual + assistive) | `PublicationReview`, `AutomatedContentReview`, `/yonetim` |
-| Private CV storage | `storage/private/**`, `src/lib/cv/*`, `/api/cv` |
+| Private CV storage | `STORAGE_ROOT/private/**` (default `<cwd>/storage/private`), `src/lib/storage/paths.ts`, `src/lib/cv/*`, `/api/cv` |
 | In-app notifications | `InAppNotification`, `/bildirimler`, `/api/bildirimler` |
 | AI jobs | `src/lib/ai/*`, `/api/ai/profile-prepare`, `scripts/ai-worker.ts` |
 | Arayanlar preparation | `src/lib/arayanlar/*`, `/arayanlar`, `/sunucu/basvurular` |
@@ -16,7 +16,8 @@ Modular monolith (logical boundaries, single Next.js app):
 | Community Q&A / invitations / FAQs / episodes | `src/lib/community/*`, `/topluluk`, `/bolumler`, `/davet/konusmaci`, `/api/topluluk/*`, `/api/davet/*`, `/api/bolumler`, `/api/uzman` |
 | Hiring (employer workspaces, jobs, discovery) | `src/lib/hiring/*`, `/is-ilanlari`, `/isveren/*`, `/davet/isveren`, `/api/isveren/*`, `/api/is-ilanlari` |
 | Podcast RSS import | `src/lib/podcast/*`, `/api/admin/podcast-rss`, admin panel on `/yonetim` |
-| Email verification (local mail-sink) | `src/lib/auth/email-verification.ts`, `/hesabim/eposta-dogrula` |
+| Email verification (dev mail-sink only) | `src/lib/auth/email-verification.ts`, `/hesabim/eposta-dogrula` — disabled when `NODE_ENV=production` |
+| Health probe | `GET /api/health` — process + DB only |
 | Credits ledger | `src/lib/credits/ledger.ts` |
 | Entitlements | `src/lib/capabilities/*` |
 | Catchylabs boundary | `src/lib/integrations/catchylabs.ts` |
@@ -40,16 +41,21 @@ Modular monolith (logical boundaries, single Next.js app):
 - Episode selectors and public APIs omit non-`PUBLISHED` episodes; appearance `adminVerifiedAt` is only set by admin paths.
 - Employer: every mutation validates workspace membership server-side; capabilities gate pilot actions separately from membership. Job listings reuse revision-bound moderation; active published job slots are enforced with advisory locks. Hiring notes and saved searches are workspace-scoped; message outreach reuses messaging quotas and blocks.
 - Staff navigation (`Yönetim`) is shown only when `staffRole` is `ADMIN` or `MODERATOR`. Grant with `npm run bootstrap:admin -- <registered-email>`.
+- Host authorization: `npm run bootstrap:host -- <email> --by <admin-email> [--mark-email-verified]`. See `docs/deployment.md`.
 - CV PDF extraction uses `pdf-parse` / `pdfjs-dist` as `serverExternalPackages` so Turbopack does not break the worker; storage keys are server-generated UUIDs (client filenames are metadata only).
 
 ## AI worker
 
 - `npm run dev` runs Next.js and `scripts/ai-worker.ts` via `scripts/dev.ts` (handles `-p` / `--port` without leaking stray args into concurrently).
-- `npm run worker` / `npm run worker:once` for dedicated processes.
+- `npm run worker` / `npm run worker:once` for dedicated processes. Production must run the worker separately from `npm start`.
 - Worker loads `.env` then `.env.local` through `loadAppEnvironment()` — the same files intended for the app. Vitest stub overrides live only in `tests/setup.ts` and do not belong in `.env.local`.
-- Jobs use lease-based claiming (`FOR UPDATE SKIP LOCKED`) with crash recovery.
+- Worker and web share `DATABASE_URL` and `STORAGE_ROOT`. Use a unique `WORKER_ID` when running multiple workers.
+- Jobs use lease-based claiming (`FOR UPDATE SKIP LOCKED`) with crash recovery and mid-flight heartbeat refresh.
+- Graceful `SIGTERM`/`SIGINT`: stop claiming new work, finish in-flight work when practical, disconnect Prisma, exit.
 - `ARAYANLAR_PREPARE` completes atomically only when both guest brief and host pack validate and persist.
 - Production (`NODE_ENV=production`) never executes stubs, even if `AI_ALLOW_STUB`, `AI_DEMO_STUB`, or `AI_PROVIDER=stub` are set.
+
+See also `docs/deployment.md`.
 
 ## Automated publication review
 
@@ -59,10 +65,11 @@ Modular monolith (logical boundaries, single Next.js app):
 
 ## Private CV retention
 
-- Files live under `storage/private/cvs` and extracted text under `storage/private/job-inputs`.
+- Files live under `STORAGE_ROOT/private/cvs` and extracted text under `STORAGE_ROOT/private/job-inputs` (development default root: `<cwd>/storage`).
 - Soft-delete removes files; failed/settled jobs do not keep text in logs.
 - Limits: 5 MB upload, 50k extracted characters (see `CV_RETENTION`).
 - Raw CV text and secrets must never be logged.
+- Configured filesystem paths must not be exposed to clients.
 
 ## Data stores
 

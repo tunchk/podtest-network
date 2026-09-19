@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { prisma } from "@/lib/db";
+import { invalidatePrismaClient, prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import {
   ARAYANLAR_PREPARE_CREDIT_COST,
@@ -540,32 +540,11 @@ export async function withdrawApplication(userId: string) {
         safeErrorMessage: "Başvuru geri çekildi.",
       },
     });
+    // Idempotent: settled jobs no-op; reserved credits release once.
     await releaseJobReservation(app.prepareJobId);
   }
 
-  const updated = await prisma.arayanlarApplication.update({
-    where: { id: app.id },
-    data: {
-      status: "WITHDRAWN",
-      prepStatus: "CANCELLED",
-      withdrawnAt: new Date(),
-      assignedHostUserId: null,
-      assignedAt: null,
-      assignedByUserId: null,
-      // Clear operational schedule / publication-review state so reopen cannot resurrect them.
-      recordingScheduledAt: null,
-      recordingTimezone: null,
-      recordingMeetingUrl: null,
-      recordingSchedulingNote: null,
-      recordingScheduledByUserId: null,
-      recordingScheduleUpdatedAt: new Date(),
-      recordingScheduleVersion: { increment: 1 },
-      publicationReviewRequestedAt: null,
-      publicationReviewVersionId: null,
-      publicationChangeRequestNote: null,
-      publicationChangeRequestedAt: null,
-    },
-  });
+  const updated = await markApplicationWithdrawn(app.id);
 
   const { notifyArayanlarApplicationWithdrawn } = await import("@/lib/arayanlar/notifications");
   await notifyArayanlarApplicationWithdrawn({
@@ -575,6 +554,101 @@ export async function withdrawApplication(userId: string) {
   });
 
   return updated;
+}
+
+function isStalePrismaClientError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "PrismaClientValidationError") return true;
+  return /Unknown argument|Unknown field|does not exist in the current database/i.test(
+    error.message,
+  );
+}
+
+/** Prisma update payload for withdrawal — kept in one place for tests/schema checks. */
+export const ARAYANLAR_WITHDRAW_UPDATE = {
+  status: "WITHDRAWN" as const,
+  prepStatus: "CANCELLED" as const,
+  assignedHostUserId: null,
+  assignedAt: null,
+  assignedByUserId: null,
+  recordingScheduledAt: null,
+  recordingTimezone: null,
+  recordingMeetingUrl: null,
+  recordingSchedulingNote: null,
+  recordingScheduledByUserId: null,
+  publicationReviewRequestedAt: null,
+  publicationReviewVersionId: null,
+  publicationChangeRequestNote: null,
+  publicationChangeRequestedAt: null,
+};
+
+/**
+ * Persist withdrawn state + clear host/schedule/publication-review fields.
+ * Retries once after invalidating a stale Prisma singleton (common under Turbopack).
+ * Falls back to parameterized SQL if the generated client still rejects withdraw fields.
+ */
+async function markApplicationWithdrawn(applicationId: string) {
+  const withdrawnAt = new Date();
+  const scheduleUpdatedAt = new Date();
+
+  const tryPrismaUpdate = () =>
+    prisma.arayanlarApplication.update({
+      where: { id: applicationId },
+      data: {
+        ...ARAYANLAR_WITHDRAW_UPDATE,
+        withdrawnAt,
+        recordingScheduleUpdatedAt: scheduleUpdatedAt,
+        recordingScheduleVersion: { increment: 1 },
+      },
+    });
+
+  try {
+    return await tryPrismaUpdate();
+  } catch (error) {
+    if (!isStalePrismaClientError(error)) throw error;
+    console.error(
+      "[arayanlar] withdraw prisma update rejected — invalidating client and retrying",
+      error instanceof Error ? error.message.slice(0, 200) : "error",
+    );
+    invalidatePrismaClient();
+    try {
+      return await tryPrismaUpdate();
+    } catch (retryError) {
+      if (!isStalePrismaClientError(retryError)) throw retryError;
+      console.error(
+        "[arayanlar] withdraw prisma update still stale — using SQL fallback",
+        retryError instanceof Error ? retryError.message.slice(0, 200) : "error",
+      );
+      await prisma.$executeRaw`
+        UPDATE "arayanlar_application"
+        SET
+          "status" = 'WITHDRAWN',
+          "prepStatus" = 'CANCELLED',
+          "withdrawnAt" = ${withdrawnAt},
+          "assignedHostUserId" = NULL,
+          "assignedAt" = NULL,
+          "assignedByUserId" = NULL,
+          "recordingScheduledAt" = NULL,
+          "recordingTimezone" = NULL,
+          "recordingMeetingUrl" = NULL,
+          "recordingSchedulingNote" = NULL,
+          "recordingScheduledByUserId" = NULL,
+          "recordingScheduleUpdatedAt" = ${scheduleUpdatedAt},
+          "recordingScheduleVersion" = "recordingScheduleVersion" + 1,
+          "publicationReviewRequestedAt" = NULL,
+          "publicationReviewVersionId" = NULL,
+          "publicationChangeRequestNote" = NULL,
+          "publicationChangeRequestedAt" = NULL,
+          "updatedAt" = ${scheduleUpdatedAt}
+        WHERE "id" = ${applicationId}
+      `;
+      const row = await prisma.arayanlarApplication.findUnique({ where: { id: applicationId } });
+      if (!row || row.status !== "WITHDRAWN") {
+        throw Object.assign(new Error("WITHDRAW_FAILED"), { code: "WITHDRAW_FAILED" });
+      }
+      return row;
+    }
+  }
 }
 
 /**

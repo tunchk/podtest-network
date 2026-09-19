@@ -73,13 +73,13 @@ describe("arayanlar presentation mapping", () => {
     ).toBe("FAILED_TERMINAL");
   });
 
-  it("resolves flow stepper without allowing invalid jumps", () => {
+  it("resolves application/preparation stepper without a dead Kayıt step", () => {
     expect(FLOW_STEPS.map((s) => s.label)).toEqual([
       "Tanışalım",
       "Bilgilerini kontrol et",
       "Hazırlık",
-      "Kayıt",
     ]);
+    expect(FLOW_STEPS.map((s) => s.id)).not.toContain("kayit");
     expect(
       resolveFlowStep({ status: "DRAFT", prepStatus: "NOT_STARTED", confirmedCostAt: null }),
     ).toBe("tanisalim");
@@ -95,7 +95,7 @@ describe("arayanlar presentation mapping", () => {
     ).toBe("hazirlik");
     expect(
       resolveFlowStep({ status: "SUBMITTED", prepStatus: "READY", confirmedCostAt: new Date() }),
-    ).toBe("kayit");
+    ).toBe("hazirlik");
   });
 
   it("reload restores facing state from server fields without requiring resubmit", () => {

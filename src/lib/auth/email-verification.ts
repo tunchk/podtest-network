@@ -3,9 +3,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/db";
 import { EMAIL_VERIFICATION_TTL_HOURS } from "@/lib/community/constants";
+import { getMailSinkDir } from "@/lib/storage/paths";
 
 function fail(code: string): never {
   throw Object.assign(new Error(code), { code });
+}
+
+/** Development-only local sink. Production must not silently "send" mail this way. */
+export function assertMailSinkAllowed(nodeEnv: string | undefined = process.env.NODE_ENV) {
+  if (nodeEnv === "production") {
+    fail("MAIL_SINK_DISABLED");
+  }
 }
 
 export function hashOpaqueToken(plaintext: string) {
@@ -18,7 +26,13 @@ export function generateOpaqueToken(bytes = 32) {
 
 /**
  * Request email verification. Writes a local mail-sink file — never sends real email.
+ * Disabled under NODE_ENV=production (no silent fake delivery).
  * Does not log the plaintext token.
+ *
+ * MVP note: outbound email is not required for Kariyer Portresi launch when
+ * host bootstrap uses trusted ops `--mark-email-verified`. Flows that truly
+ * depend on emailVerified (e.g. some invitation accept paths) need a real
+ * provider or ops verification before enabling those features in production.
  */
 export async function requestEmailVerification(userId: string) {
   const user = await prisma.user.findUnique({
@@ -30,6 +44,8 @@ export async function requestEmailVerification(userId: string) {
     return { alreadyVerified: true as const };
   }
 
+  assertMailSinkAllowed();
+
   const plaintext = generateOpaqueToken();
   const tokenHash = hashOpaqueToken(plaintext);
   const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TTL_HOURS * 60 * 60 * 1000);
@@ -38,7 +54,7 @@ export async function requestEmailVerification(userId: string) {
     data: { userId, tokenHash, expiresAt },
   });
 
-  const sinkDir = path.join(process.cwd(), "storage", "mail-sink");
+  const sinkDir = getMailSinkDir();
   await mkdir(sinkDir, { recursive: true });
   const fileName = `email-verify-${userId}-${Date.now()}.json`;
   // Store only enough for local testing; path is gitignored under storage/.

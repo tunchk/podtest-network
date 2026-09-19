@@ -39,7 +39,7 @@ PodTest Network is an open community. Anyone can join. Membership does not requi
 - Community Q&A (`/topluluk`), speaker invitations, expert FAQs, podcast episode catalog and verified appearances.
 - See `docs/community.md`.
 - Participation remains optional; no CV/interests/public profile required to ask or answer.
-- Email verification uses a local mail-sink (no real outbound mail). Invitation tokens are hashed; plaintext is copy-once for admins.
+- Email verification uses a local mail-sink in development (no real outbound mail). Disabled in production. Invitation tokens are hashed; plaintext is copy-once for admins.
 
 ## Milestone 3.3 behavior
 

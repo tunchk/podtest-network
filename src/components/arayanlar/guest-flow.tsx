@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import Link from "next/link";
 import type { DraftAnswers, SubmittedFacts } from "@/lib/arayanlar/constants";
 import { LegalCheckbox } from "@/components/legal/legal-checkbox";
+import { CvUploadControl } from "@/components/cv-upload-control";
 import { ArayanlarFlowStepper } from "@/components/arayanlar/flow-stepper";
 import {
   isPrepWaiting,
@@ -129,7 +130,7 @@ function PrepWaitingPanel({ onCheckNow, checking }: { onCheckNow: () => void; ch
         <li>
           <span className="text-[var(--accent)]">●</span> Hazırlık oluşturuluyor
         </li>
-        <li className="text-[var(--muted)]">○ Kayıt rehberi hazır</li>
+        <li className="text-[var(--muted)]">○ Notlar hazır</li>
       </ol>
       <button
         type="button"
@@ -429,7 +430,9 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
           data.message ??
             (data.error === "ALREADY_PUBLISHED"
               ? "Yayımlanmış Kariyer Portresi başvurusu geri çekilemez."
-              : data.error) ??
+              : data.error === "WITHDRAW_FAILED"
+                ? "Başvuru şu anda geri çekilemedi. Lütfen yeniden dene."
+                : data.error) ??
             "Geri çekilemedi",
         );
         return;
@@ -536,8 +539,8 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
             <>
               <p className="text-sm text-[var(--muted)]">
                 Kısa bir hazırlık sohbeti veya düzenlenebilir özet ile devam edebilirsin. Kredi
-                yalnızca bilgilerini onaylayıp hazırlığı başlattığında kullanılır. CV zorunlu
-                değildir.
+                yalnızca bilgilerini onaylayıp hazırlığı başlattığında kullanılır. Hazırlık CV
+                metninden yararlanır — yoksa aşağıdan yükleyebilirsin.
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -578,7 +581,23 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
                   </label>
                   {cvNote ? <p className="text-[var(--muted)]">{cvNote}</p> : null}
                 </div>
-              ) : null}
+              ) : (
+                <CvUploadControl
+                  idPrefix="arayanlar-cv-pre"
+                  onUploaded={(doc) => {
+                    setSelectedCvId(doc.id);
+                    setCvDocs((prev) => [
+                      {
+                        id: doc.id,
+                        originalFilename: doc.originalFilename ?? "CV",
+                        extractionStatus: "OK",
+                      },
+                      ...prev.filter((d) => d.id !== doc.id),
+                    ]);
+                    void refresh();
+                  }}
+                />
+              )}
             </>
           ) : (
             <>
@@ -628,7 +647,23 @@ export function ArayanlarGuestFlow({ startFromCv = false }: { startFromCv?: bool
                   </button>
                   {cvNote ? <p className="text-[var(--muted)]">{cvNote}</p> : null}
                 </div>
-              ) : null}
+              ) : (
+                <CvUploadControl
+                  idPrefix="arayanlar-cv-draft"
+                  onUploaded={(doc) => {
+                    setSelectedCvId(doc.id);
+                    setCvDocs((prev) => [
+                      {
+                        id: doc.id,
+                        originalFilename: doc.originalFilename ?? "CV",
+                        extractionStatus: "OK",
+                      },
+                      ...prev.filter((d) => d.id !== doc.id),
+                    ]);
+                    void refresh();
+                  }}
+                />
+              )}
 
               {!summaryMode ? (
                 <>

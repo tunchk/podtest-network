@@ -12,6 +12,10 @@ import {
 } from "react";
 import { logoutAction } from "@/app/actions";
 import { isNavActive, primaryNavMatchers, type NavMatchItem } from "@/lib/navigation/active-route";
+import {
+  buildAccountMenuItems,
+  isAccountAreaPath,
+} from "@/lib/navigation/account-menu";
 import { ui } from "@/lib/ui-copy";
 
 type NavItem = NavMatchItem & { label: string };
@@ -38,20 +42,55 @@ function focusRing() {
   return "rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2";
 }
 
+function menuItemClass(active: boolean) {
+  return [
+    "block w-full rounded-md px-3 py-2 text-left text-sm outline-none",
+    "focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1",
+    active
+      ? "bg-[var(--accent-soft)] font-semibold text-[var(--ink)]"
+      : "text-[var(--ink)] hover:bg-[color-mix(in_oklab,var(--accent-soft)_70%,var(--panel))]",
+  ].join(" ");
+}
+
+function AccountChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      aria-hidden="true"
+      className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+    >
+      <path
+        d="M2.5 4.5 6 8l3.5-3.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function SiteNav({
   signedIn,
   staff,
   host,
+  employer,
   notificationUnread,
   messageUnread,
   accountLabel,
+  accountEmail,
 }: {
   signedIn: boolean;
   staff: boolean;
   host: boolean;
+  employer: boolean;
   notificationUnread: number;
   messageUnread: number;
   accountLabel: string;
+  accountEmail?: string;
 }) {
   const pathname = usePathname() || "/";
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -62,6 +101,11 @@ export function SiteNav({
   const accountPanelRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const accountButtonRef = useRef<HTMLButtonElement | null>(null);
+  const openAccountViaKeyboardRef = useRef(false);
+
+  const accountLinks = signedIn
+    ? buildAccountMenuItems({ employer, host, staff })
+    : [];
 
   const closeMobile = useCallback(() => {
     setMobileOpen(false);
@@ -88,7 +132,12 @@ export function SiteNav({
     }
     function onPointer(e: MouseEvent) {
       const t = e.target as Node;
-      if (accountOpen && accountPanelRef.current && !accountPanelRef.current.contains(t) && !accountButtonRef.current?.contains(t)) {
+      if (
+        accountOpen &&
+        accountPanelRef.current &&
+        !accountPanelRef.current.contains(t) &&
+        !accountButtonRef.current?.contains(t)
+      ) {
         setAccountOpen(false);
       }
     }
@@ -106,25 +155,71 @@ export function SiteNav({
     first?.focus();
   }, [mobileOpen]);
 
+  useEffect(() => {
+    if (!accountOpen || !openAccountViaKeyboardRef.current) return;
+    openAccountViaKeyboardRef.current = false;
+    const first = accountPanelRef.current?.querySelector<HTMLElement>("[role='menuitem']");
+    first?.focus();
+  }, [accountOpen]);
+
+  function focusAccountItem(offset: number) {
+    const items = Array.from(
+      accountPanelRef.current?.querySelectorAll<HTMLElement>("[role='menuitem']") ?? [],
+    );
+    if (!items.length) return;
+    const current = document.activeElement as HTMLElement | null;
+    const idx = Math.max(0, items.indexOf(current as HTMLElement));
+    const next = items[(idx + offset + items.length) % items.length];
+    next?.focus();
+  }
+
   function onAccountKeyDown(e: ReactKeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setAccountOpen(true);
-      queueMicrotask(() => accountPanelRef.current?.querySelector<HTMLElement>("a, button")?.focus());
+      if (!accountOpen) {
+        openAccountViaKeyboardRef.current = true;
+        setAccountOpen(true);
+        return;
+      }
+      focusAccountItem(1);
+    }
+    if (e.key === "ArrowUp" && accountOpen) {
+      e.preventDefault();
+      focusAccountItem(-1);
+    }
+    if (e.key === "Home" && accountOpen) {
+      e.preventDefault();
+      accountPanelRef.current?.querySelector<HTMLElement>("[role='menuitem']")?.focus();
     }
   }
 
-  const accountLinks: Array<{ href: string; label: string } | null> = signedIn
-    ? [
-        { href: "/hesabim/profil", label: ui.nav.profile },
-        { href: "/isveren", label: ui.nav.employerArea },
-        host || staff ? { href: "/sunucu/basvurular", label: ui.nav.hostArea } : null,
-        staff ? { href: "/yonetim", label: ui.nav.admin } : null,
-      ]
-    : [];
+  function onAccountMenuKeyDown(e: ReactKeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      focusAccountItem(1);
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      focusAccountItem(-1);
+    }
+    if (e.key === "Home") {
+      e.preventDefault();
+      accountPanelRef.current?.querySelectorAll<HTMLElement>("[role='menuitem']")[0]?.focus();
+    }
+    if (e.key === "End") {
+      e.preventDefault();
+      const items = accountPanelRef.current?.querySelectorAll<HTMLElement>("[role='menuitem']");
+      items?.[items.length - 1]?.focus();
+    }
+  }
+
+  const accountAreaActive = isAccountAreaPath(pathname);
+  const triggerClass = accountOpen || accountAreaActive
+    ? "text-[var(--ink)] font-semibold"
+    : "text-[var(--muted)] hover:text-[var(--ink)]";
 
   return (
-    <header className="border-b border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_88%,transparent)] backdrop-blur-md">
+    <header className="relative z-50 border-b border-[var(--line)] bg-[color-mix(in_oklab,var(--surface)_88%,transparent)] backdrop-blur-md">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-4 py-3">
         <Link
           href="/"
@@ -187,7 +282,7 @@ export function SiteNav({
                 <button
                   ref={accountButtonRef}
                   type="button"
-                  className={`${navClass(pathname.startsWith("/hesabim") || pathname.startsWith("/isveren") || pathname.startsWith("/yonetim") || pathname.startsWith("/sunucu"))} ${focusRing()}`}
+                  className={`inline-flex min-h-9 items-center gap-1 rounded-md px-2 py-1.5 ${triggerClass} ${focusRing()}`}
                   aria-expanded={accountOpen}
                   aria-controls={accountId}
                   aria-haspopup="menu"
@@ -195,6 +290,7 @@ export function SiteNav({
                   onKeyDown={onAccountKeyDown}
                 >
                   {ui.nav.account}
+                  <AccountChevron open={accountOpen} />
                 </button>
                 {accountOpen ? (
                   <div
@@ -202,33 +298,43 @@ export function SiteNav({
                     ref={accountPanelRef}
                     role="menu"
                     aria-label={ui.nav.account}
-                    className="absolute right-0 z-40 mt-2 min-w-[12rem] rounded-lg border border-[var(--line)] bg-[var(--panel)] py-1 shadow-md"
+                    onKeyDown={onAccountMenuKeyDown}
+                    className="absolute right-0 top-full z-50 mt-1.5 w-[min(15.5rem,calc(100vw-1.5rem))] overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] py-1.5 shadow-[0_10px_28px_rgba(20,33,43,0.14)]"
                   >
-                    <p className="border-b border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">
-                      {accountLabel}
-                    </p>
-                    {accountLinks.map((item) =>
-                      item ? (
-                        <Link
-                          key={item.href}
+                    <div className="border-b border-[var(--line)] px-3 py-2">
+                      <p className="truncate text-xs font-medium text-[var(--ink)]">{accountLabel}</p>
+                      {accountEmail ? (
+                        <p className="mt-0.5 truncate text-[11px] text-[var(--muted)]">{accountEmail}</p>
+                      ) : null}
+                    </div>
+                    <div className="px-1 py-1">
+                      {accountLinks.map((item) => {
+                        const active = isActive(pathname, item);
+                        return (
+                          <Link
+                            key={item.href}
+                            role="menuitem"
+                            href={item.href}
+                            className={menuItemClass(active)}
+                            aria-current={active ? "page" : undefined}
+                            onClick={() => setAccountOpen(false)}
+                          >
+                            {item.label}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                    <div className="border-t border-[var(--line)] px-1 pt-1">
+                      <form action={logoutAction}>
+                        <button
                           role="menuitem"
-                          href={item.href}
-                          className={`block px-3 py-2 text-sm ${navClass(isActive(pathname, item))} ${focusRing()}`}
-                          onClick={() => setAccountOpen(false)}
+                          type="submit"
+                          className={`${menuItemClass(false)} text-[color-mix(in_oklab,var(--danger)_78%,var(--ink))] hover:bg-[color-mix(in_oklab,var(--danger)_8%,var(--panel))]`}
                         >
-                          {item.label}
-                        </Link>
-                      ) : null,
-                    )}
-                    <form action={logoutAction} className="border-t border-[var(--line)]">
-                      <button
-                        role="menuitem"
-                        type="submit"
-                        className={`block w-full px-3 py-2 text-left text-sm text-[var(--muted)] hover:text-[var(--ink)] ${focusRing()}`}
-                      >
-                        {ui.nav.signOut}
-                      </button>
-                    </form>
+                          {ui.nav.signOut}
+                        </button>
+                      </form>
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -319,7 +425,7 @@ export function SiteNav({
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`rounded-md px-3 py-2 ${navClass(active)} ${focusRing()}`}
+                  className={`rounded-md px-3 py-2.5 ${navClass(active)} ${focusRing()}`}
                   aria-current={active ? "page" : undefined}
                   onClick={() => closeMobile()}
                 >
@@ -331,10 +437,15 @@ export function SiteNav({
           <div className="mx-auto max-w-5xl border-t border-[var(--line)] px-4 py-3 text-sm">
             {signedIn ? (
               <div className="flex flex-col gap-1">
-                <p className="px-3 pb-1 text-xs text-[var(--muted)]">{accountLabel}</p>
+                <div className="px-3 pb-2">
+                  <p className="text-xs font-medium text-[var(--ink)]">{accountLabel}</p>
+                  {accountEmail ? (
+                    <p className="mt-0.5 truncate text-[11px] text-[var(--muted)]">{accountEmail}</p>
+                  ) : null}
+                </div>
                 <Link
                   href="/mesajlar"
-                  className={`rounded-md px-3 py-2 ${navClass(pathname.startsWith("/mesajlar"))} ${focusRing()}`}
+                  className={`rounded-md px-3 py-2.5 ${navClass(pathname.startsWith("/mesajlar"))} ${focusRing()}`}
                   onClick={() => closeMobile()}
                 >
                   {ui.nav.messages}
@@ -342,33 +453,37 @@ export function SiteNav({
                 </Link>
                 <Link
                   href="/bildirimler"
-                  className={`rounded-md px-3 py-2 ${navClass(pathname.startsWith("/bildirimler"))} ${focusRing()}`}
+                  className={`rounded-md px-3 py-2.5 ${navClass(pathname.startsWith("/bildirimler"))} ${focusRing()}`}
                   onClick={() => closeMobile()}
                 >
                   {ui.nav.notifications}
                   {notificationUnread > 0 ? ` (${notificationUnread})` : ""}
                 </Link>
-                {accountLinks.map((item) =>
-                  item ? (
+                {accountLinks.map((item) => {
+                  const active = isActive(pathname, item);
+                  return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      className={`rounded-md px-3 py-2 ${navClass(isActive(pathname, item))} ${focusRing()}`}
+                      className={`rounded-md px-3 py-2.5 text-[var(--ink)] ${active ? "font-semibold bg-[var(--accent-soft)]" : "hover:bg-[var(--surface)]"} ${focusRing()}`}
                       onClick={() => closeMobile()}
                     >
                       {item.label}
                     </Link>
-                  ) : null,
-                )}
-                <form action={logoutAction}>
-                  <button type="submit" className={`w-full rounded-md px-3 py-2 text-left text-[var(--muted)] ${focusRing()}`}>
+                  );
+                })}
+                <form action={logoutAction} className="mt-1 border-t border-[var(--line)] pt-1">
+                  <button
+                    type="submit"
+                    className={`w-full rounded-md px-3 py-2.5 text-left text-[color-mix(in_oklab,var(--danger)_78%,var(--ink))] ${focusRing()}`}
+                  >
                     {ui.nav.signOut}
                   </button>
                 </form>
               </div>
             ) : (
               <div className="flex flex-col gap-2">
-                <Link href="/giris" className={`rounded-md px-3 py-2 ${focusRing()}`} onClick={() => closeMobile()}>
+                <Link href="/giris" className={`rounded-md px-3 py-2.5 ${focusRing()}`} onClick={() => closeMobile()}>
                   {ui.nav.signIn}
                 </Link>
                 <Link href="/kayit" className={`btn btn-primary ${focusRing()}`} onClick={() => closeMobile()}>

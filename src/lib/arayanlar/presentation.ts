@@ -14,7 +14,7 @@ export type ArayanlarUserFacingState =
   | "FAILED_TERMINAL"
   | "WITHDRAWN";
 
-export type FlowStepId = "tanisalim" | "kontrol" | "hazirlik" | "kayit";
+export type FlowStepId = "tanisalim" | "kontrol" | "hazirlik";
 
 export type PrepJobMeta = {
   attemptCount: number;
@@ -77,20 +77,22 @@ export function userFacingStateLabel(state: ArayanlarUserFacingState): string {
   }
 }
 
-/** High-level stepper step derived from application progress. */
+/**
+ * Application/preparation stepper only (Tanışalım → Kontrol → Hazırlık).
+ * Recording schedule and publication live on /arayanlar/basvurum — not here.
+ */
 export function resolveFlowStep(options: {
   status: string;
   prepStatus: string | null | undefined;
   confirmedCostAt: string | Date | null | undefined;
 }): FlowStepId {
-  const { status, prepStatus, confirmedCostAt } = options;
+  const { status } = options;
   if (status === "WITHDRAWN") return "tanisalim";
   if (status === "SUBMITTED") {
-    if (prepStatus === "READY") return "kayit";
+    // READY stays on Hazırlık — CTA opens notes; no fake Kayıt step.
     return "hazirlik";
   }
   if (status === "AWAITING_CONFIRMATION") return "kontrol";
-  if (confirmedCostAt) return "tanisalim";
   return "tanisalim";
 }
 
@@ -98,7 +100,7 @@ export function flowStepStatus(
   step: FlowStepId,
   current: FlowStepId,
 ): "complete" | "current" | "upcoming" {
-  const order: FlowStepId[] = ["tanisalim", "kontrol", "hazirlik", "kayit"];
+  const order: FlowStepId[] = ["tanisalim", "kontrol", "hazirlik"];
   const si = order.indexOf(step);
   const ci = order.indexOf(current);
   if (si < ci) return "complete";
@@ -110,7 +112,6 @@ export const FLOW_STEPS: Array<{ id: FlowStepId; label: string }> = [
   { id: "tanisalim", label: "Tanışalım" },
   { id: "kontrol", label: "Bilgilerini kontrol et" },
   { id: "hazirlik", label: "Hazırlık" },
-  { id: "kayit", label: "Kayıt" },
 ];
 
 export function isPrepWaiting(state: ArayanlarUserFacingState) {

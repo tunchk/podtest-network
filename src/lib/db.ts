@@ -5,6 +5,30 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
+/** Bump when ArayanlarApplication withdraw fields change — forces singleton rebuild. */
+export const PRISMA_CLIENT_GENERATION = "arayanlar-withdraw-v2";
+
+const globalGen = globalThis as unknown as {
+  prismaGeneration?: string;
+};
+
+export const ARAYANLAR_WITHDRAW_FIELDS = [
+  "assignedHostUserId",
+  "assignedAt",
+  "assignedByUserId",
+  "recordingScheduledAt",
+  "recordingTimezone",
+  "recordingMeetingUrl",
+  "recordingSchedulingNote",
+  "recordingScheduledByUserId",
+  "recordingScheduleUpdatedAt",
+  "recordingScheduleVersion",
+  "publicationReviewRequestedAt",
+  "publicationReviewVersionId",
+  "publicationChangeRequestNote",
+  "publicationChangeRequestedAt",
+] as const;
+
 function createPrismaClient() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
@@ -15,32 +39,67 @@ function createPrismaClient() {
   return new PrismaClient({ adapter });
 }
 
+export function runtimeModelFieldNames(client: PrismaClient, model: string): string[] | null {
+  const runtime = client as unknown as {
+    _runtimeDataModel?: {
+      models?: Record<string, { fields?: Array<{ name: string }> }>;
+    };
+  };
+  const fields = runtime._runtimeDataModel?.models?.[model]?.fields;
+  if (!Array.isArray(fields)) return null;
+  return fields.map((f) => f.name);
+}
+
+function arayanlarWithdrawFieldsOk(client: PrismaClient): boolean {
+  const fields = runtimeModelFieldNames(client, "ArayanlarApplication");
+  // Fail closed when introspection is available and incomplete.
+  if (!fields) return true; // freshly constructed engines may omit introspection briefly
+  return ARAYANLAR_WITHDRAW_FIELDS.every((f) => fields.includes(f));
+}
+
 function hasRequiredDelegates(client: PrismaClient) {
   const c = client as unknown as {
     legalDocument?: { upsert?: unknown };
     legalAcceptance?: { create?: unknown };
+    arayanlarApplication?: { update?: unknown };
   };
-  return typeof c.legalDocument?.upsert === "function" && typeof c.legalAcceptance?.create === "function";
+  if (typeof c.legalDocument?.upsert !== "function") return false;
+  if (typeof c.legalAcceptance?.create !== "function") return false;
+  if (typeof c.arayanlarApplication?.update !== "function") return false;
+  if (globalGen.prismaGeneration !== PRISMA_CLIENT_GENERATION) return false;
+  return arayanlarWithdrawFieldsOk(client);
 }
 
-/**
- * Next.js `next dev` can keep a PrismaClient singleton constructed before
- * `prisma generate` added new models. Access then yields undefined delegates
- * (e.g. `prisma.legalDocument.upsert` → Cannot read properties of undefined).
- */
+/** Drop the global singleton so the next access rebuilds from the current generated client. */
+export function invalidatePrismaClient() {
+  const existing = globalForPrisma.prisma;
+  globalForPrisma.prisma = undefined;
+  globalGen.prismaGeneration = undefined;
+  if (existing) {
+    void existing.$disconnect().catch(() => undefined);
+  }
+}
+
 function getPrismaClient() {
   const existing = globalForPrisma.prisma;
   if (existing && hasRequiredDelegates(existing)) {
     return existing;
   }
 
+  if (existing) {
+    void existing.$disconnect().catch(() => undefined);
+    globalForPrisma.prisma = undefined;
+  }
+
   const client = createPrismaClient();
-  if (!hasRequiredDelegates(client)) {
+  const fields = runtimeModelFieldNames(client, "ArayanlarApplication");
+  if (fields && !ARAYANLAR_WITHDRAW_FIELDS.every((f) => fields.includes(f))) {
     throw new Error(
-      "Prisma Client is missing LegalDocument/LegalAcceptance delegates. Run `npx prisma generate` and restart the Next.js process.",
+      "Prisma Client is stale or incomplete (ArayanlarApplication withdraw fields). Run `npm run db:generate` and restart the Next.js process.",
     );
   }
 
+  globalGen.prismaGeneration = PRISMA_CLIENT_GENERATION;
   globalForPrisma.prisma = client;
   return client;
 }
